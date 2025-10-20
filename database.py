@@ -88,6 +88,7 @@ class YardSale(Base):
     
     # Metadata
     is_active = Column(Boolean, default=True)
+    status = Column(String(20), default="active", nullable=False)  # active, closed, on_break
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)

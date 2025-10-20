@@ -13,11 +13,18 @@ from database import get_db, create_tables, User, Item, YardSale, Comment, Messa
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
+from enum import Enum
 
 # Authentication configuration
 SECRET_KEY = secrets.token_urlsafe(32)  # Generate a random secret key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Yard Sale Status Enum
+class YardSaleStatus(str, Enum):
+    ACTIVE = "active"
+    CLOSED = "closed"
+    ON_BREAK = "on_break"
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__default_rounds=12)
@@ -126,6 +133,9 @@ class YardSaleCreate(BaseModel):
     # Media
     photos: Optional[List[str]] = Field(None, description="List of photo URLs/paths")
     featured_image: Optional[str] = Field(None, max_length=500, description="Featured image URL/path")
+    
+    # Status
+    status: Optional[YardSaleStatus] = Field(YardSaleStatus.ACTIVE, description="Yard sale status: active, closed, on_break")
 
 class YardSaleUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200)
@@ -150,6 +160,7 @@ class YardSaleUpdate(BaseModel):
     photos: Optional[List[str]] = None
     featured_image: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
+    status: Optional[YardSaleStatus] = Field(None, description="Yard sale status: active, closed, on_break")
 
 class YardSaleResponse(BaseModel):
     id: int
@@ -175,6 +186,7 @@ class YardSaleResponse(BaseModel):
     photos: Optional[List[str]]
     featured_image: Optional[str]
     is_active: bool
+    status: YardSaleStatus
     created_at: datetime
     updated_at: datetime
     owner_id: int
@@ -553,6 +565,7 @@ async def create_yard_sale(yard_sale: YardSaleCreate, current_user: User = Depen
         payment_methods=yard_sale.payment_methods,
         photos=yard_sale.photos,
         featured_image=yard_sale.featured_image,
+        status=yard_sale.status.value if yard_sale.status else "active",
         owner_id=current_user.id
     )
     
@@ -578,6 +591,7 @@ async def get_yard_sales(
     zip_code: Optional[str] = None,
     category: Optional[str] = None,
     price_range: Optional[str] = None,
+    status: Optional[YardSaleStatus] = None,
     db: Session = Depends(get_db)
 ):
     """Get all active yard sales with optional filtering"""
@@ -594,6 +608,8 @@ async def get_yard_sales(
         query = query.filter(YardSale.categories.contains([category]))
     if price_range:
         query = query.filter(YardSale.price_range == price_range)
+    if status:
+        query = query.filter(YardSale.status == status.value)
     
     # Order by start date (upcoming sales first)
     query = query.order_by(YardSale.start_date.asc())
@@ -656,6 +672,8 @@ async def update_yard_sale(
     for field, value in update_data.items():
         if field == "state" and value:
             value = value.upper()  # Store state as uppercase
+        elif field == "status" and value:
+            value = value.value if hasattr(value, 'value') else value  # Handle enum
         setattr(yard_sale, field, value)
     
     db.commit()

@@ -39,7 +39,7 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 
 ### Yard Sale Discovery (🌍 Public Routes)
 
-- `GET /yard-sales` - Get all active yard sales with filtering
+- `GET /yard-sales` - Get all active yard sales with filtering (including status filter)
 - `GET /yard-sales/{yard_sale_id}` - Get specific yard sale details
 - `GET /yard-sales/search/nearby` - Search yard sales by ZIP code
 
@@ -195,7 +195,35 @@ curl -X POST "http://localhost:8000/yard-sales" \
        "allow_messages": true,
        "categories": ["Furniture", "Clothing", "Electronics", "Toys"],
        "price_range": "Under $50",
-       "payment_methods": ["Cash", "Venmo", "Zelle"]
+       "payment_methods": ["Cash", "Venmo", "Zelle"],
+       "status": "active"
+     }'
+```
+
+### 8a. Create Yard Sale with Different Status
+
+```bash
+# Create a yard sale that's on break
+curl -X POST "http://localhost:8000/yard-sales" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "title": "Weekend Sale - On Break",
+       "description": "Taking a lunch break, will be back soon!",
+       "start_date": "2025-10-25",
+       "start_time": "09:00:00",
+       "end_time": "17:00:00",
+       "address": "456 Oak Street",
+       "city": "Vernal",
+       "state": "UT",
+       "zip_code": "84078",
+       "contact_name": "Jane Doe",
+       "contact_phone": "(435) 555-1234",
+       "allow_messages": true,
+       "categories": ["Furniture", "Clothing"],
+       "price_range": "Under $25",
+       "payment_methods": ["Cash"],
+       "status": "on_break"
      }'
 ```
 
@@ -221,6 +249,19 @@ curl -X GET "http://localhost:8000/yard-sales?category=Furniture"
 
 ```bash
 curl -X GET "http://localhost:8000/yard-sales/search/nearby?zip_code=94102"
+```
+
+### 12a. Filter Yard Sales by Status
+
+```bash
+# Get only active yard sales
+curl -X GET "http://localhost:8000/yard-sales?status=active"
+
+# Get yard sales that are on break
+curl -X GET "http://localhost:8000/yard-sales?status=on_break"
+
+# Get closed yard sales
+curl -X GET "http://localhost:8000/yard-sales?status=closed"
 ```
 
 ### 13. Add a Comment to Yard Sale
@@ -289,6 +330,36 @@ curl -X DELETE "http://localhost:8000/messages/1" \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
+## Yard Sale Status Management
+
+### 21. Update Yard Sale Status
+
+```bash
+# Set yard sale to "on_break" (taking a break)
+curl -X PUT "http://localhost:8000/yard-sales/1" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "status": "on_break"
+     }'
+
+# Set yard sale to "closed" (sale ended)
+curl -X PUT "http://localhost:8000/yard-sales/1" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "status": "closed"
+     }'
+
+# Set yard sale back to "active"
+curl -X PUT "http://localhost:8000/yard-sales/1" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "status": "active"
+     }'
+```
+
 ## Data Models
 
 ### User
@@ -341,6 +412,7 @@ curl -X DELETE "http://localhost:8000/messages/1" \
 - `photos`: List of photo URLs/paths (optional)
 - `featured_image`: Featured image URL/path (optional, max 500 characters)
 - `is_active`: Whether the yard sale is active (default: true)
+- `status`: Yard sale status - "active", "closed", or "on_break" (default: "active")
 - `created_at`: Creation timestamp (auto-generated)
 - `updated_at`: Last update timestamp (auto-generated)
 - `owner_id`: ID of the user who created this yard sale
