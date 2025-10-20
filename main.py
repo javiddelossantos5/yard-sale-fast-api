@@ -55,17 +55,51 @@ app = FastAPI(
 )
 
 # Pydantic models for request/response validation
+class Location(BaseModel):
+    city: Optional[str] = Field(None, max_length=100, description="City name")
+    state: Optional[str] = Field(None, max_length=2, description="State abbreviation")
+    zip: Optional[str] = Field(None, max_length=10, description="ZIP code")
+
+class PaymentMethod(BaseModel):
+    username: Optional[str] = Field(None, max_length=100, description="Username for the payment method")
+    email: Optional[str] = Field(None, max_length=100, description="Email for the payment method")
+    phone: Optional[str] = Field(None, max_length=20, description="Phone for the payment method")
+    link: Optional[str] = Field(None, max_length=500, description="Link for the payment method")
+
+class PaymentMethods(BaseModel):
+    venmo: Optional[PaymentMethod] = None
+    paypal: Optional[PaymentMethod] = None
+    zelle: Optional[PaymentMethod] = None
+    google_pay: Optional[PaymentMethod] = None
+    apple_pay: Optional[PaymentMethod] = None
+
+class UserPreferences(BaseModel):
+    notifications: bool = Field(True, description="Enable notifications")
+    radius_preference: int = Field(10, ge=1, le=100, description="Search radius in miles")
+    theme: str = Field("light", description="UI theme preference")
+
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="Username")
     email: str = Field(..., description="Email address")
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=72, description="Password (6-72 characters)")
+    full_name: Optional[str] = Field(None, max_length=100, description="Full name")
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number")
+    location: Optional[Location] = None
+    bio: Optional[str] = Field(None, max_length=1000, description="User bio")
 
 class UserResponse(UserBase):
     id: int
+    full_name: Optional[str]
+    phone_number: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    zip_code: Optional[str]
+    bio: Optional[str]
     is_active: bool
     created_at: datetime
+    updated_at: datetime
 
 class UserLogin(BaseModel):
     username: str = Field(..., description="Username or email")
@@ -364,10 +398,22 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     
     # Create new user
     hashed_password = get_password_hash(user.password)
+    
+    # Extract location data
+    city = user.location.city if user.location else None
+    state = user.location.state if user.location else None
+    zip_code = user.location.zip if user.location else None
+    
     db_user = User(
         username=user.username,
         email=user.email,
         hashed_password=hashed_password,
+        full_name=user.full_name,
+        phone_number=user.phone_number,
+        city=city,
+        state=state,
+        zip_code=zip_code,
+        bio=user.bio,
         is_active=True
     )
     
@@ -376,13 +422,20 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     
     # Return user without password
-    return {
-        "id": db_user.id,
-        "username": db_user.username,
-        "email": db_user.email,
-        "is_active": db_user.is_active,
-        "created_at": db_user.created_at
-    }
+    return UserResponse(
+        id=db_user.id,
+        username=db_user.username,
+        email=db_user.email,
+        full_name=db_user.full_name,
+        phone_number=db_user.phone_number,
+        city=db_user.city,
+        state=db_user.state,
+        zip_code=db_user.zip_code,
+        bio=db_user.bio,
+        is_active=db_user.is_active,
+        created_at=db_user.created_at,
+        updated_at=db_user.updated_at
+    )
 
 @app.post("/login", response_model=Token)
 async def login_user(user_credentials: UserLogin, db: Session = Depends(get_db)):

@@ -24,8 +24,19 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(100), nullable=True)
+    phone_number = Column(String(20), nullable=True)
+    bio = Column(Text, nullable=True)
+    
+    # Location fields
+    city = Column(String(100), nullable=True)
+    state = Column(String(2), nullable=True)
+    zip_code = Column(String(10), nullable=True)
+    
+    # Account status
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     items = relationship("Item", back_populates="owner")
