@@ -44,6 +44,8 @@ class User(Base):
     comments = relationship("Comment", back_populates="user")
     sent_messages = relationship("Message", foreign_keys="Message.sender_id", back_populates="sender")
     received_messages = relationship("Message", foreign_keys="Message.recipient_id", back_populates="recipient")
+    conversations_as_participant1 = relationship("Conversation", foreign_keys="Conversation.participant1_id", back_populates="participant1")
+    conversations_as_participant2 = relationship("Conversation", foreign_keys="Conversation.participant2_id", back_populates="participant2")
 
 class Item(Base):
     __tablename__ = "items"
@@ -107,7 +109,7 @@ class YardSale(Base):
     # Relationships
     owner = relationship("User", back_populates="yard_sales")
     comments = relationship("Comment", back_populates="yard_sale", cascade="all, delete-orphan")
-    messages = relationship("Message", back_populates="yard_sale", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="yard_sale", cascade="all, delete-orphan")
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -125,6 +127,22 @@ class Comment(Base):
     yard_sale = relationship("YardSale", back_populates="comments")
     user = relationship("User", back_populates="comments")
 
+class Conversation(Base):
+    __tablename__ = "conversations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
+    participant1_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    participant2_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    yard_sale = relationship("YardSale", back_populates="conversations")
+    participant1 = relationship("User", foreign_keys=[participant1_id], back_populates="conversations_as_participant1")
+    participant2 = relationship("User", foreign_keys=[participant2_id], back_populates="conversations_as_participant2")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
 class Message(Base):
     __tablename__ = "messages"
     
@@ -134,12 +152,12 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Foreign Keys
-    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
     sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Relationships
-    yard_sale = relationship("YardSale", back_populates="messages")
+    conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
     recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_messages")
 

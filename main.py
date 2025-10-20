@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
-from database import get_db, create_tables, User, Item, YardSale, Comment, Message
+from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -245,12 +245,29 @@ class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000, description="Message content")
     recipient_id: int = Field(..., description="ID of the user receiving the message")
 
+class ConversationResponse(BaseModel):
+    id: int
+    yard_sale_id: int
+    yard_sale_title: str
+    participant1_id: int
+    participant1_username: str
+    participant2_id: int
+    participant2_username: str
+    last_message: Optional[str] = None
+    last_message_time: Optional[datetime] = None
+    unread_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
 class MessageResponse(BaseModel):
     id: int
     content: str
     is_read: bool
     created_at: datetime
-    yard_sale_id: int
+    conversation_id: int
     sender_id: int
     sender_username: str
     recipient_id: int
@@ -258,6 +275,39 @@ class MessageResponse(BaseModel):
 
 # Token blacklist for logout functionality
 token_blacklist = set()
+
+# Conversation helper functions
+def get_or_create_conversation(db: Session, yard_sale_id: int, user1_id: int, user2_id: int) -> Conversation:
+    """Get existing conversation or create a new one between two users for a yard sale"""
+    # Ensure consistent ordering (smaller ID first)
+    participant1_id = min(user1_id, user2_id)
+    participant2_id = max(user1_id, user2_id)
+    
+    # Look for existing conversation
+    conversation = db.query(Conversation).filter(
+        Conversation.yard_sale_id == yard_sale_id,
+        Conversation.participant1_id == participant1_id,
+        Conversation.participant2_id == participant2_id
+    ).first()
+    
+    if not conversation:
+        # Create new conversation
+        conversation = Conversation(
+            yard_sale_id=yard_sale_id,
+            participant1_id=participant1_id,
+            participant2_id=participant2_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+    else:
+        # Update the conversation's updated_at timestamp
+        conversation.updated_at = datetime.utcnow()
+        db.commit()
+    
+    return conversation
 
 # Authentication utility functions
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -893,12 +943,13 @@ async def send_message(
     if not yard_sale.allow_messages:
         raise HTTPException(status_code=400, detail="This yard sale does not allow messages")
     
-    # Allow sending messages to yourself (useful for responding to messages)
+    # Get or create conversation between the two users
+    conversation = get_or_create_conversation(db, yard_sale_id, current_user.id, message_data.recipient_id)
     
     # Create the message
     message = Message(
         content=message_data.content,
-        yard_sale_id=yard_sale_id,
+        conversation_id=conversation.id,
         sender_id=current_user.id,
         recipient_id=message_data.recipient_id
     )
@@ -912,7 +963,7 @@ async def send_message(
         content=message.content,
         is_read=message.is_read,
         created_at=message.created_at,
-        yard_sale_id=message.yard_sale_id,
+        conversation_id=message.conversation_id,
         sender_id=message.sender_id,
         sender_username=current_user.username,
         recipient_id=message.recipient_id,
@@ -950,6 +1001,99 @@ async def get_yard_sale_messages(
             is_read=message.is_read,
             created_at=message.created_at,
             yard_sale_id=message.yard_sale_id,
+            sender_id=message.sender_id,
+            sender_username=sender.username,
+            recipient_id=message.recipient_id,
+            recipient_username=recipient.username
+        ))
+    
+    return result
+
+# Get all conversations for current user
+@app.get("/conversations", response_model=List[ConversationResponse])
+async def get_user_conversations(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all conversations for the current user"""
+    # Get conversations where user is either participant1 or participant2
+    conversations = db.query(Conversation).filter(
+        (Conversation.participant1_id == current_user.id) | 
+        (Conversation.participant2_id == current_user.id)
+    ).order_by(Conversation.updated_at.desc()).all()
+    
+    result = []
+    for conv in conversations:
+        # Get yard sale info
+        yard_sale = db.query(YardSale).filter(YardSale.id == conv.yard_sale_id).first()
+        
+        # Get participant info
+        participant1 = db.query(User).filter(User.id == conv.participant1_id).first()
+        participant2 = db.query(User).filter(User.id == conv.participant2_id).first()
+        
+        # Get last message
+        last_message = db.query(Message).filter(
+            Message.conversation_id == conv.id
+        ).order_by(Message.created_at.desc()).first()
+        
+        # Count unread messages for current user
+        unread_count = db.query(Message).filter(
+            Message.conversation_id == conv.id,
+            Message.recipient_id == current_user.id,
+            Message.is_read == False
+        ).count()
+        
+        result.append(ConversationResponse(
+            id=conv.id,
+            yard_sale_id=conv.yard_sale_id,
+            yard_sale_title=yard_sale.title if yard_sale else "Unknown",
+            participant1_id=conv.participant1_id,
+            participant1_username=participant1.username,
+            participant2_id=conv.participant2_id,
+            participant2_username=participant2.username,
+            last_message=last_message.content if last_message else None,
+            last_message_time=last_message.created_at if last_message else None,
+            unread_count=unread_count,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at
+        ))
+    
+    return result
+
+# Get messages for a specific conversation
+@app.get("/conversations/{conversation_id}/messages", response_model=List[MessageResponse])
+async def get_conversation_messages(
+    conversation_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a specific conversation"""
+    # Check if user is participant in this conversation
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        (Conversation.participant1_id == current_user.id) | 
+        (Conversation.participant2_id == current_user.id)
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+    
+    # Get messages for this conversation
+    messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id
+    ).order_by(Message.created_at.asc()).all()
+    
+    result = []
+    for message in messages:
+        sender = db.query(User).filter(User.id == message.sender_id).first()
+        recipient = db.query(User).filter(User.id == message.recipient_id).first()
+        
+        result.append(MessageResponse(
+            id=message.id,
+            content=message.content,
+            is_read=message.is_read,
+            created_at=message.created_at,
+            conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=sender.username,
             recipient_id=message.recipient_id,
