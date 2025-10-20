@@ -10,6 +10,7 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - **📍 Location-Based Search**: Find yard sales by city, state, ZIP code
 - **🏷️ Advanced Filtering**: Filter by categories, price range, payment methods
 - **💬 Community Comments**: Comment system for yard sale discussions
+- **📧 Personal Messaging**: Private messaging between yard sale owners and customers
 - **🔒 Protected Routes**: All yard sale operations require authentication
 - **✅ Data Validation**: Using Pydantic models for request/response validation
 - **⚠️ Error Handling**: Proper HTTP status codes and error messages
@@ -47,6 +48,15 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - `POST /yard-sales/{yard_sale_id}/comments` - Add comment to yard sale
 - `GET /yard-sales/{yard_sale_id}/comments` - Get all comments for yard sale
 - `DELETE /comments/{comment_id}` - Delete comment (owner only)
+
+### Personal Messaging System (🔒 Protected Routes)
+
+- `POST /yard-sales/{yard_sale_id}/messages` - Send private message to yard sale owner
+- `GET /yard-sales/{yard_sale_id}/messages` - Get conversation for specific yard sale
+- `GET /messages` - Get all messages for current user (inbox)
+- `GET /messages/unread-count` - Get count of unread messages
+- `PUT /messages/{message_id}/read` - Mark message as read
+- `DELETE /messages/{message_id}` - Delete message (sender or recipient)
 
 ### Item Management (🔒 Protected Routes)
 
@@ -230,6 +240,55 @@ curl -X POST "http://localhost:8000/yard-sales/1/comments" \
 curl -X GET "http://localhost:8000/yard-sales/1/comments"
 ```
 
+## Personal Messaging Examples
+
+### 15. Send a Private Message
+
+```bash
+curl -X POST "http://localhost:8000/yard-sales/1/messages" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "content": "Hi! I am interested in the furniture you have for sale. Do you have any dining room tables available?",
+       "recipient_id": 2
+     }'
+```
+
+### 16. Get Conversation for Yard Sale
+
+```bash
+curl -X GET "http://localhost:8000/yard-sales/1/messages" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 17. Get All Messages (Inbox)
+
+```bash
+curl -X GET "http://localhost:8000/messages" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 18. Get Unread Messages Count
+
+```bash
+curl -X GET "http://localhost:8000/messages/unread-count" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 19. Mark Message as Read
+
+```bash
+curl -X PUT "http://localhost:8000/messages/1/read" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 20. Delete a Message
+
+```bash
+curl -X DELETE "http://localhost:8000/messages/1" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ## Data Models
 
 ### User
@@ -297,6 +356,18 @@ curl -X GET "http://localhost:8000/yard-sales/1/comments"
 - `user_id`: ID of the user who wrote the comment
 - `username`: Username of the comment author
 - `yard_sale_id`: ID of the yard sale this comment belongs to
+
+### Message
+
+- `id`: Unique identifier (auto-generated)
+- `content`: Message content (required, 1-1000 characters)
+- `is_read`: Whether the message has been read (default: false)
+- `created_at`: Creation timestamp (auto-generated)
+- `yard_sale_id`: ID of the yard sale this message is about
+- `sender_id`: ID of the user who sent the message
+- `sender_username`: Username of the message sender
+- `recipient_id`: ID of the user who received the message
+- `recipient_username`: Username of the message recipient
 
 ## Error Handling
 

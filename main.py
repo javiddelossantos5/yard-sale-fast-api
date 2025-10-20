@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
-from database import get_db, create_tables, User, Item, YardSale, Comment
+from database import get_db, create_tables, User, Item, YardSale, Comment, Message
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -193,6 +193,22 @@ class CommentResponse(BaseModel):
     user_id: int
     username: str
     yard_sale_id: int
+
+# Message Models
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000, description="Message content")
+    recipient_id: int = Field(..., description="ID of the user receiving the message")
+
+class MessageResponse(BaseModel):
+    id: int
+    content: str
+    is_read: bool
+    created_at: datetime
+    yard_sale_id: int
+    sender_id: int
+    sender_username: str
+    recipient_id: int
+    recipient_username: str
 
 # Token blacklist for logout functionality
 token_blacklist = set()
@@ -778,6 +794,186 @@ async def delete_comment(
     db.commit()
     
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+# ============================================================================
+# MESSAGE ENDPOINTS
+# ============================================================================
+
+# Send a message to yard sale owner
+@app.post("/yard-sales/{yard_sale_id}/messages", response_model=MessageResponse)
+async def send_message(
+    yard_sale_id: int,
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a private message to the yard sale owner"""
+    # Check if yard sale exists
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    if not yard_sale:
+        raise HTTPException(status_code=404, detail="Yard sale not found")
+    
+    # Check if recipient exists
+    recipient = db.query(User).filter(User.id == message_data.recipient_id).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    
+    # Check if yard sale allows messages
+    if not yard_sale.allow_messages:
+        raise HTTPException(status_code=400, detail="This yard sale does not allow messages")
+    
+    # Don't allow sending messages to yourself
+    if current_user.id == message_data.recipient_id:
+        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+    
+    # Create the message
+    message = Message(
+        content=message_data.content,
+        yard_sale_id=yard_sale_id,
+        sender_id=current_user.id,
+        recipient_id=message_data.recipient_id
+    )
+    
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    
+    return MessageResponse(
+        id=message.id,
+        content=message.content,
+        is_read=message.is_read,
+        created_at=message.created_at,
+        yard_sale_id=message.yard_sale_id,
+        sender_id=message.sender_id,
+        sender_username=current_user.username,
+        recipient_id=message.recipient_id,
+        recipient_username=recipient.username
+    )
+
+# Get messages for a specific yard sale (conversation)
+@app.get("/yard-sales/{yard_sale_id}/messages", response_model=List[MessageResponse])
+async def get_yard_sale_messages(
+    yard_sale_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a specific yard sale (only participants can see)"""
+    # Check if yard sale exists
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    if not yard_sale:
+        raise HTTPException(status_code=404, detail="Yard sale not found")
+    
+    # Get messages where current user is either sender or recipient
+    messages = db.query(Message).filter(
+        Message.yard_sale_id == yard_sale_id,
+        (Message.sender_id == current_user.id) | (Message.recipient_id == current_user.id)
+    ).order_by(Message.created_at.asc()).all()
+    
+    # Get sender and recipient usernames
+    result = []
+    for message in messages:
+        sender = db.query(User).filter(User.id == message.sender_id).first()
+        recipient = db.query(User).filter(User.id == message.recipient_id).first()
+        
+        result.append(MessageResponse(
+            id=message.id,
+            content=message.content,
+            is_read=message.is_read,
+            created_at=message.created_at,
+            yard_sale_id=message.yard_sale_id,
+            sender_id=message.sender_id,
+            sender_username=sender.username,
+            recipient_id=message.recipient_id,
+            recipient_username=recipient.username
+        ))
+    
+    return result
+
+# Get all messages for current user (inbox)
+@app.get("/messages", response_model=List[MessageResponse])
+async def get_user_messages(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for the current user (both sent and received)"""
+    messages = db.query(Message).filter(
+        (Message.sender_id == current_user.id) | (Message.recipient_id == current_user.id)
+    ).order_by(Message.created_at.desc()).all()
+    
+    result = []
+    for message in messages:
+        sender = db.query(User).filter(User.id == message.sender_id).first()
+        recipient = db.query(User).filter(User.id == message.recipient_id).first()
+        
+        result.append(MessageResponse(
+            id=message.id,
+            content=message.content,
+            is_read=message.is_read,
+            created_at=message.created_at,
+            yard_sale_id=message.yard_sale_id,
+            sender_id=message.sender_id,
+            sender_username=sender.username,
+            recipient_id=message.recipient_id,
+            recipient_username=recipient.username
+        ))
+    
+    return result
+
+# Get unread messages count
+@app.get("/messages/unread-count")
+async def get_unread_messages_count(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get count of unread messages for current user"""
+    unread_count = db.query(Message).filter(
+        Message.recipient_id == current_user.id,
+        Message.is_read == False
+    ).count()
+    
+    return {"unread_count": unread_count}
+
+# Mark message as read
+@app.put("/messages/{message_id}/read")
+async def mark_message_as_read(
+    message_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark a message as read (only recipient can mark as read)"""
+    message = db.query(Message).filter(Message.id == message_id).first()
+    
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    if message.recipient_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to mark this message as read")
+    
+    message.is_read = True
+    db.commit()
+    
+    return {"message": "Message marked as read"}
+
+# Delete message (sender or recipient can delete)
+@app.delete("/messages/{message_id}")
+async def delete_message(
+    message_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a message (sender or recipient can delete)"""
+    message = db.query(Message).filter(Message.id == message_id).first()
+    
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    if message.sender_id != current_user.id and message.recipient_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this message")
+    
+    db.delete(message)
+    db.commit()
+    
+    return {"message": "Message deleted successfully"}
 
 # Custom exception handler
 @app.exception_handler(ValueError)

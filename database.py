@@ -31,6 +31,8 @@ class User(Base):
     items = relationship("Item", back_populates="owner")
     yard_sales = relationship("YardSale", back_populates="owner")
     comments = relationship("Comment", back_populates="user")
+    sent_messages = relationship("Message", foreign_keys="Message.sender_id", back_populates="sender")
+    received_messages = relationship("Message", foreign_keys="Message.recipient_id", back_populates="recipient")
 
 class Item(Base):
     __tablename__ = "items"
@@ -93,6 +95,7 @@ class YardSale(Base):
     # Relationships
     owner = relationship("User", back_populates="yard_sales")
     comments = relationship("Comment", back_populates="yard_sale", cascade="all, delete-orphan")
+    messages = relationship("Message", back_populates="yard_sale", cascade="all, delete-orphan")
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -109,6 +112,24 @@ class Comment(Base):
     # Relationships
     yard_sale = relationship("YardSale", back_populates="comments")
     user = relationship("User", back_populates="comments")
+
+class Message(Base):
+    __tablename__ = "messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Foreign Keys
+    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # Relationships
+    yard_sale = relationship("YardSale", back_populates="messages")
+    sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
+    recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_messages")
 
 # Dependency to get database session
 def get_db():
