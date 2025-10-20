@@ -893,9 +893,7 @@ async def send_message(
     if not yard_sale.allow_messages:
         raise HTTPException(status_code=400, detail="This yard sale does not allow messages")
     
-    # Don't allow sending messages to yourself
-    if current_user.id == message_data.recipient_id:
-        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+    # Allow sending messages to yourself (useful for responding to messages)
     
     # Create the message
     message = Message(
