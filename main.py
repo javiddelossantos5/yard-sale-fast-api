@@ -157,6 +157,7 @@ class YardSaleCreate(BaseModel):
     contact_name: str = Field(..., min_length=1, max_length=100, description="Contact person name")
     contact_phone: Optional[str] = Field(None, max_length=20, description="Contact phone number")
     contact_email: Optional[str] = Field(None, max_length=100, description="Contact email")
+    venmo_url: Optional[str] = Field(None, max_length=500, description="Venmo profile URL")
     allow_messages: bool = Field(True, description="Allow messages through app")
     
     # Sale Details
@@ -187,6 +188,7 @@ class YardSaleUpdate(BaseModel):
     contact_name: Optional[str] = Field(None, min_length=1, max_length=100)
     contact_phone: Optional[str] = Field(None, max_length=20)
     contact_email: Optional[str] = Field(None, max_length=100)
+    venmo_url: Optional[str] = Field(None, max_length=500)
     allow_messages: Optional[bool] = None
     categories: Optional[List[str]] = None
     price_range: Optional[str] = Field(None, max_length=50)
@@ -213,6 +215,7 @@ class YardSaleResponse(BaseModel):
     contact_name: str
     contact_phone: Optional[str]
     contact_email: Optional[str]
+    venmo_url: Optional[str]
     allow_messages: bool
     categories: Optional[List[str]]
     price_range: Optional[str]
@@ -662,6 +665,7 @@ async def create_yard_sale(yard_sale: YardSaleCreate, current_user: User = Depen
         contact_name=yard_sale.contact_name,
         contact_phone=yard_sale.contact_phone,
         contact_email=yard_sale.contact_email,
+        venmo_url=yard_sale.venmo_url,
         allow_messages=yard_sale.allow_messages,
         categories=yard_sale.categories,
         price_range=yard_sale.price_range,
