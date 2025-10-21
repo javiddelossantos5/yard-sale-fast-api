@@ -539,13 +539,20 @@ async def logout_user(current_user: User = Depends(get_current_active_user)):
 @app.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Get current user information"""
-    return {
-        "id": current_user.id,
-        "username": current_user.username,
-        "email": current_user.email,
-        "is_active": current_user.is_active,
-        "created_at": current_user.created_at
-    }
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        phone_number=current_user.phone_number,
+        city=current_user.city,
+        state=current_user.state,
+        zip_code=current_user.zip_code,
+        bio=current_user.bio,
+        is_active=current_user.is_active,
+        created_at=current_user.created_at,
+        updated_at=current_user.updated_at
+    )
 
 # GET all items (protected route)
 @app.get("/items", response_model=List[ItemResponse])
