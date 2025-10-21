@@ -983,10 +983,19 @@ async def get_yard_sale_messages(
     if not yard_sale:
         raise HTTPException(status_code=404, detail="Yard sale not found")
     
-    # Get messages where current user is either sender or recipient
+    # Get conversations for this yard sale where current user is a participant
+    conversations = db.query(Conversation).filter(
+        Conversation.yard_sale_id == yard_sale_id,
+        (Conversation.participant1_id == current_user.id) | (Conversation.participant2_id == current_user.id)
+    ).all()
+    
+    if not conversations:
+        return []
+    
+    # Get all messages from these conversations
+    conversation_ids = [conv.id for conv in conversations]
     messages = db.query(Message).filter(
-        Message.yard_sale_id == yard_sale_id,
-        (Message.sender_id == current_user.id) | (Message.recipient_id == current_user.id)
+        Message.conversation_id.in_(conversation_ids)
     ).order_by(Message.created_at.asc()).all()
     
     # Get sender and recipient usernames
@@ -1000,7 +1009,7 @@ async def get_yard_sale_messages(
             content=message.content,
             is_read=message.is_read,
             created_at=message.created_at,
-            yard_sale_id=message.yard_sale_id,
+            conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=sender.username,
             recipient_id=message.recipient_id,
@@ -1123,7 +1132,7 @@ async def get_user_messages(
             content=message.content,
             is_read=message.is_read,
             created_at=message.created_at,
-            yard_sale_id=message.yard_sale_id,
+            conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=sender.username,
             recipient_id=message.recipient_id,
