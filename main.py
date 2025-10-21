@@ -20,6 +20,23 @@ SECRET_KEY = secrets.token_urlsafe(32)  # Generate a random secret key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+# Helper functions
+def get_standard_payment_methods() -> List[str]:
+    """Get list of standard payment methods available"""
+    return [
+        "Cash",
+        "Credit Card",
+        "Debit Card",
+        "Venmo",
+        "PayPal",
+        "Zelle",
+        "Apple Pay",
+        "Google Pay",
+        "Samsung Pay",
+        "Cash App",
+        "Check"
+    ]
+
 # Yard Sale Status Enum
 class YardSaleStatus(str, Enum):
     ACTIVE = "active"
@@ -644,6 +661,12 @@ async def search_items(
         query = query.filter(Item.is_available == is_available)
     
     return query.all()
+
+# Utility Endpoints
+@app.get("/payment-methods", response_model=List[str])
+async def get_payment_methods():
+    """Get list of available payment methods"""
+    return get_standard_payment_methods()
 
 # Yard Sale Endpoints
 @app.post("/yard-sales", response_model=YardSaleResponse, status_code=status.HTTP_201_CREATED)

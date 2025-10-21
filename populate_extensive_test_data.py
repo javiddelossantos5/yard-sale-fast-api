@@ -173,7 +173,7 @@ def main():
             "allow_messages": True,
             "categories": ["Furniture", "Appliances", "Tools", "Household"],
             "price_range": "$10-$200",
-            "payment_methods": ["Cash", "Venmo", "PayPal"],
+            "payment_methods": ["Cash", "Venmo", "PayPal", "Apple Pay", "Google Pay"],
             "owner": "sarahjohnson"
         },
         {
@@ -193,7 +193,7 @@ def main():
             "allow_messages": True,
             "categories": ["Clothing", "Toys", "Books", "Baby Gear"],
             "price_range": "Under $25",
-            "payment_methods": ["Cash", "Venmo"],
+            "payment_methods": ["Cash", "Venmo", "Apple Pay", "Samsung Pay"],
             "owner": "mikechen"
         },
         {
@@ -213,7 +213,7 @@ def main():
             "allow_messages": True,
             "categories": ["Electronics", "Gaming", "Computers"],
             "price_range": "$50-$500",
-            "payment_methods": ["Cash", "Venmo", "Zelle", "PayPal"],
+            "payment_methods": ["Cash", "Venmo", "Zelle", "PayPal", "Apple Pay", "Google Pay", "Credit Card"],
             "owner": "alexrodriguez"
         },
         {
@@ -233,7 +233,7 @@ def main():
             "allow_messages": False,
             "categories": ["Antiques", "Vintage", "Collectibles", "Furniture"],
             "price_range": "$25-$300",
-            "payment_methods": ["Cash", "Check"],
+            "payment_methods": ["Cash", "Check", "Credit Card", "Money Order"],
             "owner": "margarethompson"
         },
         {
@@ -253,7 +253,7 @@ def main():
             "allow_messages": True,
             "categories": ["Outdoor", "Sports", "Camping", "Fishing"],
             "price_range": "$15-$150",
-            "payment_methods": ["Cash", "Venmo"],
+            "payment_methods": ["Cash", "Venmo", "Apple Pay", "Cash App"],
             "owner": "tomwilson"
         },
         {
@@ -273,7 +273,7 @@ def main():
             "allow_messages": True,
             "categories": ["Furniture", "Clothing", "Kitchen", "Miscellaneous"],
             "price_range": "$5-$100",
-            "payment_methods": ["Cash", "Venmo", "Zelle"],
+            "payment_methods": ["Cash", "Venmo", "Zelle", "Google Pay", "Samsung Pay"],
             "owner": "jenniferdavis"
         },
         
@@ -295,7 +295,7 @@ def main():
             "allow_messages": True,
             "categories": ["Furniture", "Electronics", "Home Decor"],
             "price_range": "$20-$300",
-            "payment_methods": ["Cash", "Venmo", "Zelle"],
+            "payment_methods": ["Cash", "Venmo", "Zelle", "Apple Pay", "Credit Card"],
             "owner": "davidlee"
         },
         {
