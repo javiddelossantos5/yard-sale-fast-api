@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 import uvicorn
 from datetime import datetime, timedelta
+import pytz
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
@@ -21,6 +22,11 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Helper functions
+def get_mountain_time() -> datetime:
+    """Get current time in Mountain Time Zone (Vernal, Utah)"""
+    mountain_tz = pytz.timezone('America/Denver')  # Mountain Time Zone
+    return datetime.now(mountain_tz)
+
 def get_standard_payment_methods() -> List[str]:
     """Get list of standard payment methods available"""
     return [
@@ -121,6 +127,10 @@ class UserResponse(UserBase):
 class UserLogin(BaseModel):
     username: str = Field(..., description="Username or email")
     password: str = Field(..., description="Password")
+
+class PasswordUpdate(BaseModel):
+    current_password: str = Field(..., min_length=6, max_length=72, description="Current password")
+    new_password: str = Field(..., min_length=6, max_length=72, description="New password (6-72 characters)")
 
 class Token(BaseModel):
     access_token: str
@@ -316,15 +326,15 @@ def get_or_create_conversation(db: Session, yard_sale_id: int, user1_id: int, us
             yard_sale_id=yard_sale_id,
             participant1_id=participant1_id,
             participant2_id=participant2_id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=get_mountain_time(),
+            updated_at=get_mountain_time()
         )
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
     else:
         # Update the conversation's updated_at timestamp
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = get_mountain_time()
         db.commit()
     
     return conversation
@@ -553,6 +563,30 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
         created_at=current_user.created_at,
         updated_at=current_user.updated_at
     )
+
+@app.put("/me/password")
+async def update_password(
+    password_data: PasswordUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Update user password"""
+    # Verify current password
+    if not verify_password(password_data.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect"
+        )
+    
+    # Hash new password
+    new_hashed_password = get_password_hash(password_data.new_password)
+    
+    # Update password in database
+    current_user.hashed_password = new_hashed_password
+    current_user.updated_at = get_mountain_time()
+    db.commit()
+    
+    return {"message": "Password updated successfully"}
 
 # GET all items (protected route)
 @app.get("/items", response_model=List[ItemResponse])

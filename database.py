@@ -1,7 +1,13 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Date, Time, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime, date, time
+from datetime import datetime
+import pytz
+
+def get_mountain_time():
+    """Get current time in Mountain Time Zone (Vernal, Utah)"""
+    mountain_tz = pytz.timezone('America/Denver')  # Mountain Time Zone
+    return datetime.now(mountain_tz)
 
 # Database configuration
 # MySQL root user has empty password
@@ -35,8 +41,8 @@ class User(Base):
     
     # Account status
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Relationships
     items = relationship("Item", back_populates="owner")
@@ -55,7 +61,7 @@ class Item(Base):
     description = Column(String(500), nullable=True)
     price = Column(Float, nullable=False)
     is_available = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_mountain_time)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Relationship with user
@@ -103,8 +109,8 @@ class YardSale(Base):
     # Metadata
     is_active = Column(Boolean, default=True)
     status = Column(String(20), default="active", nullable=False)  # active, closed, on_break
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Relationships
@@ -117,8 +123,8 @@ class Comment(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Foreign Keys
     yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
@@ -135,8 +141,8 @@ class Conversation(Base):
     yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
     participant1_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     participant2_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Relationships
     yard_sale = relationship("YardSale", back_populates="conversations")
@@ -150,7 +156,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_mountain_time)
     
     # Foreign Keys
     conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)

@@ -159,8 +159,8 @@ def main():
         {
             "title": "Vernal Family Moving Sale",
             "description": "Moving out of state! Everything must go! Furniture, appliances, tools, and household items. Great deals on quality items.",
-            "start_date": "2025-10-26",
-            "end_date": "2025-10-27",
+            "start_date": "2024-10-26",
+            "end_date": "2024-10-27",
             "start_time": "07:00:00",
             "end_time": "17:00:00",
             "address": "456 Oak Street",
@@ -179,7 +179,7 @@ def main():
         {
             "title": "Kids' Clothes & Toys Yard Sale",
             "description": "Kids have outgrown everything! Tons of clothes sizes 2T-12, toys, books, and baby gear. All items in excellent condition.",
-            "start_date": "2025-10-28",
+            "start_date": "2024-10-28",
             "end_date": None,
             "start_time": "09:00:00",
             "end_time": "15:00:00",
@@ -199,8 +199,8 @@ def main():
         {
             "title": "Electronics & Gaming Sale",
             "description": "Upgrading my setup! Selling gaming consoles, computers, monitors, and electronics. Some items still under warranty.",
-            "start_date": "2025-10-29",
-            "end_date": "2025-10-30",
+            "start_date": "2024-10-29",
+            "end_date": "2024-10-30",
             "start_time": "10:00:00",
             "end_time": "18:00:00",
             "address": "321 Elm Drive",
@@ -219,8 +219,8 @@ def main():
         {
             "title": "Antique & Vintage Collection",
             "description": "Estate sale featuring antique furniture, vintage collectibles, and unique finds. Perfect for collectors and decorators.",
-            "start_date": "2025-11-01",
-            "end_date": "2025-11-02",
+            "start_date": "2024-11-01",
+            "end_date": "2024-11-02",
             "start_time": "08:00:00",
             "end_time": "16:00:00",
             "address": "654 Maple Lane",
@@ -239,7 +239,7 @@ def main():
         {
             "title": "Outdoor & Sports Equipment",
             "description": "Camping gear, fishing equipment, bikes, and outdoor sports items. Perfect for outdoor enthusiasts!",
-            "start_date": "2025-11-03",
+            "start_date": "2024-11-03",
             "end_date": None,
             "start_time": "07:30:00",
             "end_time": "14:00:00",
@@ -259,8 +259,8 @@ def main():
         {
             "title": "Multi-Family Neighborhood Sale",
             "description": "Three families selling together! Furniture, clothes, kitchen items, and more. Something for everyone!",
-            "start_date": "2025-11-04",
-            "end_date": "2025-11-05",
+            "start_date": "2024-11-04",
+            "end_date": "2024-11-05",
             "start_time": "08:00:00",
             "end_time": "17:00:00",
             "address": "147 Birch Road",
@@ -281,7 +281,7 @@ def main():
         {
             "title": "Downtown SLC Apartment Sale",
             "description": "Moving to a smaller place! Selling furniture, electronics, and home decor. Everything in great condition.",
-            "start_date": "2025-11-06",
+            "start_date": "2024-11-06",
             "end_date": None,
             "start_time": "09:00:00",
             "end_time": "16:00:00",
@@ -301,8 +301,8 @@ def main():
         {
             "title": "University Student Moving Sale",
             "description": "Graduating and moving! Selling dorm furniture, textbooks, and college essentials. Great prices for students!",
-            "start_date": "2025-11-07",
-            "end_date": "2025-11-08",
+            "start_date": "2024-11-07",
+            "end_date": "2024-11-08",
             "start_time": "10:00:00",
             "end_time": "18:00:00",
             "address": "456 University Ave",
@@ -323,7 +323,7 @@ def main():
         {
             "title": "BYU Student Housing Sale",
             "description": "End of semester sale! Furniture, kitchen items, and study materials. Perfect for incoming students.",
-            "start_date": "2025-11-09",
+            "start_date": "2024-11-09",
             "end_date": None,
             "start_time": "08:00:00",
             "end_time": "15:00:00",
@@ -345,8 +345,8 @@ def main():
         {
             "title": "Denver Suburb Family Sale",
             "description": "Family downsizing! Selling furniture, toys, and household items. Everything must go!",
-            "start_date": "2025-11-10",
-            "end_date": "2025-11-11",
+            "start_date": "2024-11-10",
+            "end_date": "2024-11-11",
             "start_time": "07:00:00",
             "end_time": "17:00:00",
             "address": "321 Mountain View Drive",
@@ -365,7 +365,7 @@ def main():
         {
             "title": "Denver Tech Worker Sale",
             "description": "Remote work setup sale! Selling office furniture, monitors, and tech accessories. High-quality items!",
-            "start_date": "2025-11-12",
+            "start_date": "2024-11-12",
             "end_date": None,
             "start_time": "09:00:00",
             "end_time": "16:00:00",
@@ -387,8 +387,8 @@ def main():
         {
             "title": "Phoenix Retirement Community Sale",
             "description": "Retirement community sale! Selling furniture, collectibles, and household items. Moving to assisted living.",
-            "start_date": "2025-11-13",
-            "end_date": "2025-11-14",
+            "start_date": "2024-11-13",
+            "end_date": "2024-11-14",
             "start_time": "08:00:00",
             "end_time": "16:00:00",
             "address": "987 Desert Rose Lane",
@@ -407,7 +407,7 @@ def main():
         {
             "title": "Phoenix College Student Sale",
             "description": "End of semester! Selling textbooks, dorm furniture, and college supplies. Great deals for students!",
-            "start_date": "2025-11-15",
+            "start_date": "2024-11-15",
             "end_date": None,
             "start_time": "10:00:00",
             "end_time": "17:00:00",
