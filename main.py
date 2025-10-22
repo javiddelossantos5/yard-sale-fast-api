@@ -129,8 +129,14 @@ class UserLogin(BaseModel):
     password: str = Field(..., description="Password")
 
 class PasswordUpdate(BaseModel):
+    email: str = Field(..., description="Email address of the account")
     current_password: str = Field(..., min_length=6, max_length=72, description="Current password")
     new_password: str = Field(..., min_length=6, max_length=72, description="New password (6-72 characters)")
+
+class PasswordReset(BaseModel):
+    email: str = Field(..., description="Email address of the account")
+    new_password: str = Field(..., min_length=6, max_length=72, description="New password (6-72 characters)")
+    confirm_password: str = Field(..., min_length=6, max_length=72, description="Confirm new password")
 
 class Token(BaseModel):
     access_token: str
@@ -571,6 +577,13 @@ async def update_password(
     db: Session = Depends(get_db)
 ):
     """Update user password"""
+    # Verify email matches the authenticated user
+    if password_data.email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email does not match the authenticated user's email"
+        )
+    
     # Verify current password
     if not verify_password(password_data.current_password, current_user.hashed_password):
         raise HTTPException(
@@ -587,6 +600,38 @@ async def update_password(
     db.commit()
     
     return {"message": "Password updated successfully"}
+
+@app.put("/reset-password")
+async def reset_password(
+    password_data: PasswordReset,
+    db: Session = Depends(get_db)
+):
+    """Reset password using email address (for forgot password scenario)"""
+    # Validate that new password and confirm password match
+    if password_data.new_password != password_data.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password and confirm password do not match"
+        )
+    
+    # Find user by email
+    user = db.query(User).filter(User.email == password_data.email).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email address"
+        )
+    
+    # Hash new password
+    new_hashed_password = get_password_hash(password_data.new_password)
+    
+    # Update password in database
+    user.hashed_password = new_hashed_password
+    user.updated_at = get_mountain_time()
+    db.commit()
+    
+    return {"message": "Password reset successfully"}
 
 # GET all items (protected route)
 @app.get("/items", response_model=List[ItemResponse])
