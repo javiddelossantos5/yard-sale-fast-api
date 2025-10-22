@@ -58,6 +58,24 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - `PUT /messages/{message_id}/read` - Mark message as read
 - `DELETE /messages/{message_id}` - Delete message (sender or recipient)
 
+### Community & Trust System (🔒 Protected Routes)
+
+#### User Ratings & Reviews
+
+- `POST /users/{user_id}/ratings` - Rate and review a user (1-5 stars)
+- `GET /users/{user_id}/ratings` - Get all ratings for a user
+- `GET /users/{user_id}/profile` - Get user profile with trust metrics
+
+#### Reporting System
+
+- `POST /reports` - Report inappropriate content, scams, or users
+- `GET /reports` - Get user's own reports
+
+#### Verification System
+
+- `POST /verifications` - Request verification (email, phone, identity, address)
+- `GET /verifications` - Get user's verification status
+
 ### Item Management (🔒 Protected Routes)
 
 - `GET /items` - Get all items for current user
@@ -360,6 +378,88 @@ curl -X PUT "http://localhost:8000/yard-sales/1" \
      }'
 ```
 
+## Community & Trust System Examples
+
+### 22. Rate and Review a User
+
+```bash
+# Rate a user after a successful yard sale interaction
+curl -X POST "http://localhost:8000/users/15/ratings" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "rating": 5,
+       "review_text": "Great seller! Very friendly and had exactly what I was looking for. Highly recommend!",
+       "yard_sale_id": 23
+     }'
+```
+
+### 23. Get User Ratings
+
+```bash
+# Get all ratings for a specific user
+curl -X GET "http://localhost:8000/users/15/ratings"
+```
+
+### 24. Get User Profile with Trust Metrics
+
+```bash
+# Get user profile including average rating, total ratings, and verification badges
+curl -X GET "http://localhost:8000/users/15/profile"
+```
+
+### 25. Report Inappropriate Content
+
+```bash
+# Report a yard sale for inappropriate content
+curl -X POST "http://localhost:8000/reports" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "report_type": "inappropriate",
+       "description": "This yard sale listing contains inappropriate content and misleading information.",
+       "reported_yard_sale_id": 1
+     }'
+
+# Report a user for suspicious behavior
+curl -X POST "http://localhost:8000/reports" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "report_type": "scam",
+       "description": "This user is asking for payment upfront without showing items. Very suspicious behavior.",
+       "reported_user_id": 15
+     }'
+```
+
+### 26. Request Verification
+
+```bash
+# Request email verification
+curl -X POST "http://localhost:8000/verifications" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "verification_type": "email"
+     }'
+
+# Request phone verification
+curl -X POST "http://localhost:8000/verifications" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "verification_type": "phone"
+     }'
+```
+
+### 27. Get Verification Status
+
+```bash
+# Get all verification requests for current user
+curl -X GET "http://localhost:8000/verifications" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ## Data Models
 
 ### User
@@ -435,11 +535,67 @@ curl -X PUT "http://localhost:8000/yard-sales/1" \
 - `content`: Message content (required, 1-1000 characters)
 - `is_read`: Whether the message has been read (default: false)
 - `created_at`: Creation timestamp (auto-generated)
-- `yard_sale_id`: ID of the yard sale this message is about
+- `conversation_id`: ID of the conversation this message belongs to
 - `sender_id`: ID of the user who sent the message
 - `sender_username`: Username of the message sender
 - `recipient_id`: ID of the user who received the message
 - `recipient_username`: Username of the message recipient
+
+### User Rating
+
+- `id`: Unique identifier (auto-generated)
+- `rating`: Star rating from 1-5 (required)
+- `review_text`: Optional review text (up to 1000 characters)
+- `created_at`: Creation timestamp (auto-generated)
+- `reviewer_id`: ID of the user giving the rating
+- `reviewer_username`: Username of the reviewer
+- `rated_user_id`: ID of the user being rated
+- `rated_user_username`: Username of the rated user
+- `yard_sale_id`: Optional ID of related yard sale
+- `yard_sale_title`: Title of related yard sale (if applicable)
+
+### User Profile (with Trust Metrics)
+
+- `id`: Unique identifier (auto-generated)
+- `username`: Username (required, 3-50 characters)
+- `email`: Email address (required, valid email format)
+- `full_name`: Full name (optional, up to 100 characters)
+- `phone_number`: Phone number (optional, up to 20 characters)
+- `city`: City (optional, up to 100 characters)
+- `state`: State abbreviation (optional, 2 characters)
+- `zip_code`: ZIP code (optional, up to 10 characters)
+- `bio`: User bio (optional, up to 1000 characters)
+- `is_active`: Account status (default: true)
+- `created_at`: Account creation timestamp (auto-generated)
+- `updated_at`: Last update timestamp (auto-generated)
+- `average_rating`: Average rating from all reviews (calculated)
+- `total_ratings`: Total number of ratings received
+- `verification_badges`: List of verified verification types
+- `is_verified`: Whether user has any verified badges
+
+### Report
+
+- `id`: Unique identifier (auto-generated)
+- `report_type`: Type of report ("scam", "inappropriate", "spam", "other")
+- `description`: Detailed description of the issue (required, 10-1000 characters)
+- `status`: Report status ("pending", "reviewed", "resolved", "dismissed")
+- `created_at`: Creation timestamp (auto-generated)
+- `reporter_id`: ID of the user making the report
+- `reporter_username`: Username of the reporter
+- `reported_user_id`: Optional ID of reported user
+- `reported_user_username`: Username of reported user (if applicable)
+- `reported_yard_sale_id`: Optional ID of reported yard sale
+- `reported_yard_sale_title`: Title of reported yard sale (if applicable)
+
+### Verification
+
+- `id`: Unique identifier (auto-generated)
+- `verification_type`: Type of verification ("email", "phone", "identity", "address")
+- `status`: Verification status ("pending", "verified", "rejected")
+- `verified_at`: Timestamp when verification was completed (if verified)
+- `created_at`: Request creation timestamp (auto-generated)
+- `user_id`: ID of the user requesting verification
+- `user_username`: Username of the user requesting verification
 
 ## Error Handling
 

@@ -52,6 +52,13 @@ class User(Base):
     received_messages = relationship("Message", foreign_keys="Message.recipient_id", back_populates="recipient")
     conversations_as_participant1 = relationship("Conversation", foreign_keys="Conversation.participant1_id", back_populates="participant1")
     conversations_as_participant2 = relationship("Conversation", foreign_keys="Conversation.participant2_id", back_populates="participant2")
+    
+    # Trust system relationships
+    ratings_given = relationship("UserRating", foreign_keys="UserRating.reviewer_id", back_populates="reviewer")
+    ratings_received = relationship("UserRating", foreign_keys="UserRating.rated_user_id", back_populates="rated_user")
+    reports_made = relationship("Report", foreign_keys="Report.reporter_id", back_populates="reporter")
+    reports_received = relationship("Report", foreign_keys="Report.reported_user_id", back_populates="reported_user")
+    verifications = relationship("Verification", back_populates="user")
 
 class Item(Base):
     __tablename__ = "items"
@@ -117,6 +124,8 @@ class YardSale(Base):
     owner = relationship("User", back_populates="yard_sales")
     comments = relationship("Comment", back_populates="yard_sale", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="yard_sale", cascade="all, delete-orphan")
+    ratings = relationship("UserRating", back_populates="yard_sale")
+    reports = relationship("Report", back_populates="reported_yard_sale")
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -167,6 +176,61 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
     recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_messages")
+
+class UserRating(Base):
+    __tablename__ = "user_ratings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    rating = Column(Integer, nullable=False)  # 1-5 stars
+    review_text = Column(Text, nullable=True)  # Optional review text
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Foreign Keys
+    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User giving the rating
+    rated_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User being rated
+    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=True)  # Optional: related yard sale
+    
+    # Relationships
+    reviewer = relationship("User", foreign_keys=[reviewer_id], back_populates="ratings_given")
+    rated_user = relationship("User", foreign_keys=[rated_user_id], back_populates="ratings_received")
+    yard_sale = relationship("YardSale", back_populates="ratings")
+
+class Report(Base):
+    __tablename__ = "reports"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    report_type = Column(String(50), nullable=False)  # "scam", "inappropriate", "spam", "other"
+    description = Column(Text, nullable=False)
+    status = Column(String(20), default="pending")  # "pending", "reviewed", "resolved", "dismissed"
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Foreign Keys
+    reporter_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User making the report
+    reported_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User being reported
+    reported_yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=True)  # Yard sale being reported
+    
+    # Relationships
+    reporter = relationship("User", foreign_keys=[reporter_id], back_populates="reports_made")
+    reported_user = relationship("User", foreign_keys=[reported_user_id], back_populates="reports_received")
+    reported_yard_sale = relationship("YardSale", back_populates="reports")
+
+class Verification(Base):
+    __tablename__ = "verifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    verification_type = Column(String(50), nullable=False)  # "email", "phone", "identity", "address"
+    status = Column(String(20), default="pending")  # "pending", "verified", "rejected"
+    verified_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Foreign Keys
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="verifications")
 
 # Dependency to get database session
 def get_db():

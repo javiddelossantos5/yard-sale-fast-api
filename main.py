@@ -10,7 +10,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
-from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation
+from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -307,6 +307,75 @@ class MessageResponse(BaseModel):
     sender_username: str
     recipient_id: int
     recipient_username: str
+
+# Trust System Models
+class UserRatingCreate(BaseModel):
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
+    review_text: Optional[str] = Field(None, max_length=1000, description="Optional review text")
+    yard_sale_id: Optional[int] = Field(None, description="Optional yard sale ID if rating is related to a specific sale")
+
+class UserRatingResponse(BaseModel):
+    id: int
+    rating: int
+    review_text: Optional[str]
+    created_at: datetime
+    reviewer_id: int
+    reviewer_username: str
+    rated_user_id: int
+    rated_user_username: str
+    yard_sale_id: Optional[int]
+    yard_sale_title: Optional[str]
+
+class UserProfileResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    full_name: Optional[str]
+    phone_number: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    zip_code: Optional[str]
+    bio: Optional[str]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    
+    # Trust metrics
+    average_rating: Optional[float] = None
+    total_ratings: int = 0
+    verification_badges: List[str] = []
+    is_verified: bool = False
+
+class ReportCreate(BaseModel):
+    report_type: str = Field(..., description="Type of report: scam, inappropriate, spam, other")
+    description: str = Field(..., min_length=10, max_length=1000, description="Detailed description of the issue")
+    reported_user_id: Optional[int] = Field(None, description="ID of user being reported")
+    reported_yard_sale_id: Optional[int] = Field(None, description="ID of yard sale being reported")
+
+class ReportResponse(BaseModel):
+    id: int
+    report_type: str
+    description: str
+    status: str
+    created_at: datetime
+    reporter_id: int
+    reporter_username: str
+    reported_user_id: Optional[int]
+    reported_user_username: Optional[str]
+    reported_yard_sale_id: Optional[int]
+    reported_yard_sale_title: Optional[str]
+
+class VerificationCreate(BaseModel):
+    verification_type: str = Field(..., description="Type of verification: email, phone, identity, address")
+
+class VerificationResponse(BaseModel):
+    id: int
+    verification_type: str
+    status: str
+    verified_at: Optional[datetime]
+    created_at: datetime
+    user_id: int
+    user_username: str
 
 # Token blacklist for logout functionality
 token_blacklist = set()
@@ -1307,6 +1376,288 @@ async def delete_message(
     db.commit()
     
     return {"message": "Message deleted successfully"}
+
+# ============================================================================
+# TRUST SYSTEM ENDPOINTS
+# ============================================================================
+
+# User Rating and Review Endpoints
+@app.post("/users/{user_id}/ratings", response_model=UserRatingResponse)
+async def create_user_rating(
+    user_id: int,
+    rating_data: UserRatingCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Rate and review a user"""
+    # Check if user exists
+    rated_user = db.query(User).filter(User.id == user_id).first()
+    if not rated_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent self-rating
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot rate yourself")
+    
+    # Check if user already rated this person
+    existing_rating = db.query(UserRating).filter(
+        UserRating.reviewer_id == current_user.id,
+        UserRating.rated_user_id == user_id
+    ).first()
+    
+    if existing_rating:
+        raise HTTPException(status_code=400, detail="You have already rated this user")
+    
+    # Validate yard sale if provided
+    yard_sale = None
+    if rating_data.yard_sale_id:
+        yard_sale = db.query(YardSale).filter(YardSale.id == rating_data.yard_sale_id).first()
+        if not yard_sale:
+            raise HTTPException(status_code=404, detail="Yard sale not found")
+    
+    # Create rating
+    rating = UserRating(
+        rating=rating_data.rating,
+        review_text=rating_data.review_text,
+        reviewer_id=current_user.id,
+        rated_user_id=user_id,
+        yard_sale_id=rating_data.yard_sale_id
+    )
+    
+    db.add(rating)
+    db.commit()
+    db.refresh(rating)
+    
+    return UserRatingResponse(
+        id=rating.id,
+        rating=rating.rating,
+        review_text=rating.review_text,
+        created_at=rating.created_at,
+        reviewer_id=rating.reviewer_id,
+        reviewer_username=current_user.username,
+        rated_user_id=rating.rated_user_id,
+        rated_user_username=rated_user.username,
+        yard_sale_id=rating.yard_sale_id,
+        yard_sale_title=yard_sale.title if yard_sale else None
+    )
+
+@app.get("/users/{user_id}/ratings", response_model=List[UserRatingResponse])
+async def get_user_ratings(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all ratings for a user"""
+    # Check if user exists
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    ratings = db.query(UserRating).filter(UserRating.rated_user_id == user_id).all()
+    
+    result = []
+    for rating in ratings:
+        yard_sale = None
+        if rating.yard_sale_id:
+            yard_sale = db.query(YardSale).filter(YardSale.id == rating.yard_sale_id).first()
+        
+        result.append(UserRatingResponse(
+            id=rating.id,
+            rating=rating.rating,
+            review_text=rating.review_text,
+            created_at=rating.created_at,
+            reviewer_id=rating.reviewer_id,
+            reviewer_username=rating.reviewer.username,
+            rated_user_id=rating.rated_user_id,
+            rated_user_username=rating.rated_user.username,
+            yard_sale_id=rating.yard_sale_id,
+            yard_sale_title=yard_sale.title if yard_sale else None
+        ))
+    
+    return result
+
+@app.get("/users/{user_id}/profile", response_model=UserProfileResponse)
+async def get_user_profile(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get user profile with trust metrics"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Calculate average rating
+    ratings = db.query(UserRating).filter(UserRating.rated_user_id == user_id).all()
+    average_rating = None
+    if ratings:
+        average_rating = sum(r.rating for r in ratings) / len(ratings)
+    
+    # Get verification badges
+    verifications = db.query(Verification).filter(
+        Verification.user_id == user_id,
+        Verification.status == "verified"
+    ).all()
+    verification_badges = [v.verification_type for v in verifications]
+    
+    return UserProfileResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        phone_number=user.phone_number,
+        city=user.city,
+        state=user.state,
+        zip_code=user.zip_code,
+        bio=user.bio,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+        average_rating=average_rating,
+        total_ratings=len(ratings),
+        verification_badges=verification_badges,
+        is_verified=len(verification_badges) > 0
+    )
+
+# Report Endpoints
+@app.post("/reports", response_model=ReportResponse)
+async def create_report(
+    report_data: ReportCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Create a report for a user or yard sale"""
+    # Validate reported user if provided
+    reported_user = None
+    if report_data.reported_user_id:
+        reported_user = db.query(User).filter(User.id == report_data.reported_user_id).first()
+        if not reported_user:
+            raise HTTPException(status_code=404, detail="Reported user not found")
+    
+    # Validate reported yard sale if provided
+    reported_yard_sale = None
+    if report_data.reported_yard_sale_id:
+        reported_yard_sale = db.query(YardSale).filter(YardSale.id == report_data.reported_yard_sale_id).first()
+        if not reported_yard_sale:
+            raise HTTPException(status_code=404, detail="Reported yard sale not found")
+    
+    # Create report
+    report = Report(
+        report_type=report_data.report_type,
+        description=report_data.description,
+        reporter_id=current_user.id,
+        reported_user_id=report_data.reported_user_id,
+        reported_yard_sale_id=report_data.reported_yard_sale_id
+    )
+    
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    
+    return ReportResponse(
+        id=report.id,
+        report_type=report.report_type,
+        description=report.description,
+        status=report.status,
+        created_at=report.created_at,
+        reporter_id=report.reporter_id,
+        reporter_username=current_user.username,
+        reported_user_id=report.reported_user_id,
+        reported_user_username=reported_user.username if reported_user else None,
+        reported_yard_sale_id=report.reported_yard_sale_id,
+        reported_yard_sale_title=reported_yard_sale.title if reported_yard_sale else None
+    )
+
+@app.get("/reports", response_model=List[ReportResponse])
+async def get_reports(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all reports (admin only - for now, returns user's own reports)"""
+    reports = db.query(Report).filter(Report.reporter_id == current_user.id).all()
+    
+    result = []
+    for report in reports:
+        reported_user = None
+        if report.reported_user_id:
+            reported_user = db.query(User).filter(User.id == report.reported_user_id).first()
+        
+        reported_yard_sale = None
+        if report.reported_yard_sale_id:
+            reported_yard_sale = db.query(YardSale).filter(YardSale.id == report.reported_yard_sale_id).first()
+        
+        result.append(ReportResponse(
+            id=report.id,
+            report_type=report.report_type,
+            description=report.description,
+            status=report.status,
+            created_at=report.created_at,
+            reporter_id=report.reporter_id,
+            reporter_username=report.reporter.username,
+            reported_user_id=report.reported_user_id,
+            reported_user_username=reported_user.username if reported_user else None,
+            reported_yard_sale_id=report.reported_yard_sale_id,
+            reported_yard_sale_title=reported_yard_sale.title if reported_yard_sale else None
+        ))
+    
+    return result
+
+# Verification Endpoints
+@app.post("/verifications", response_model=VerificationResponse)
+async def create_verification(
+    verification_data: VerificationCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Request verification for a user"""
+    # Check if verification already exists
+    existing_verification = db.query(Verification).filter(
+        Verification.user_id == current_user.id,
+        Verification.verification_type == verification_data.verification_type
+    ).first()
+    
+    if existing_verification:
+        raise HTTPException(status_code=400, detail="Verification request already exists for this type")
+    
+    # Create verification request
+    verification = Verification(
+        verification_type=verification_data.verification_type,
+        user_id=current_user.id
+    )
+    
+    db.add(verification)
+    db.commit()
+    db.refresh(verification)
+    
+    return VerificationResponse(
+        id=verification.id,
+        verification_type=verification.verification_type,
+        status=verification.status,
+        verified_at=verification.verified_at,
+        created_at=verification.created_at,
+        user_id=verification.user_id,
+        user_username=current_user.username
+    )
+
+@app.get("/verifications", response_model=List[VerificationResponse])
+async def get_user_verifications(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all verifications for current user"""
+    verifications = db.query(Verification).filter(Verification.user_id == current_user.id).all()
+    
+    result = []
+    for verification in verifications:
+        result.append(VerificationResponse(
+            id=verification.id,
+            verification_type=verification.verification_type,
+            status=verification.status,
+            verified_at=verification.verified_at,
+            created_at=verification.created_at,
+            user_id=verification.user_id,
+            user_username=current_user.username
+        ))
+    
+    return result
 
 # Custom exception handler
 @app.exception_handler(ValueError)
