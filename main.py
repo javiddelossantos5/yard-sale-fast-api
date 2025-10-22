@@ -108,7 +108,6 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=72, description="Password (6-72 characters)")
     full_name: Optional[str] = Field(None, max_length=100, description="Full name")
-    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number")
     location: Optional[Location] = None
     bio: Optional[str] = Field(None, max_length=1000, description="User bio")
 
@@ -495,7 +494,6 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         hashed_password=hashed_password,
         full_name=user.full_name,
-        phone_number=user.phone_number,
         city=city,
         state=state,
         zip_code=zip_code,
