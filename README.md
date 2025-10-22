@@ -63,8 +63,10 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 #### User Ratings & Reviews
 
 - `POST /users/{user_id}/ratings` - Rate and review a user (1-5 stars)
+- `POST /ratings` - Create a new rating/review for a user (alternative endpoint)
 - `GET /users/{user_id}/ratings` - Get all ratings for a user
 - `GET /users/{user_id}/profile` - Get user profile with trust metrics
+- `GET /users/{user_id}` - Get detailed user profile by ID with trust metrics
 
 #### Reporting System
 
@@ -75,6 +77,7 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 
 - `POST /verifications` - Request verification (email, phone, identity, address)
 - `GET /verifications` - Get user's verification status
+- `GET /users/{user_id}/verifications` - Get all verifications for a specific user
 
 ### Item Management (🔒 Protected Routes)
 
@@ -383,7 +386,7 @@ curl -X PUT "http://localhost:8000/yard-sales/1" \
 ### 22. Rate and Review a User
 
 ```bash
-# Rate a user after a successful yard sale interaction
+# Rate a user after a successful yard sale interaction (path parameter method)
 curl -X POST "http://localhost:8000/users/15/ratings" \
      -H "Content-Type: application/json" \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
@@ -391,6 +394,17 @@ curl -X POST "http://localhost:8000/users/15/ratings" \
        "rating": 5,
        "review_text": "Great seller! Very friendly and had exactly what I was looking for. Highly recommend!",
        "yard_sale_id": 23
+     }'
+
+# Rate a user (alternative endpoint with rated_user_id in body)
+curl -X POST "http://localhost:8000/ratings" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "rating": 4,
+       "review_text": "Great seller! Very professional and items were exactly as described.",
+       "rated_user_id": 2,
+       "yard_sale_id": 1
      }'
 ```
 
@@ -406,6 +420,9 @@ curl -X GET "http://localhost:8000/users/15/ratings"
 ```bash
 # Get user profile including average rating, total ratings, and verification badges
 curl -X GET "http://localhost:8000/users/15/profile"
+
+# Get detailed user profile by ID (alternative endpoint)
+curl -X GET "http://localhost:8000/users/15"
 ```
 
 ### 25. Report Inappropriate Content
@@ -458,6 +475,9 @@ curl -X POST "http://localhost:8000/verifications" \
 # Get all verification requests for current user
 curl -X GET "http://localhost:8000/verifications" \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get all verifications for a specific user
+curl -X GET "http://localhost:8000/users/15/verifications"
 ```
 
 ## Data Models
