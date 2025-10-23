@@ -51,12 +51,16 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 
 ### Personal Messaging System (🔒 Protected Routes)
 
-- `POST /yard-sales/{yard_sale_id}/messages` - Send private message to yard sale owner
-- `GET /yard-sales/{yard_sale_id}/messages` - Get conversation for specific yard sale
+- `POST /yard-sales/{yard_sale_id}/messages` - Send message to yard sale owner
+- `POST /conversations/{conversation_id}/messages` - Send message in existing conversation
+- `POST /messages` - Send message (general endpoint - requires yard_sale_id OR conversation_id)
+- `GET /yard-sales/{yard_sale_id}/messages` - Get messages for a yard sale conversation
+- `GET /conversations/{conversation_id}/messages` - Get messages for a specific conversation
+- `GET /conversations` - Get all conversations for current user
 - `GET /messages` - Get all messages for current user (inbox)
-- `GET /messages/unread-count` - Get count of unread messages
+- `GET /messages/unread-count` - Get unread message count
 - `PUT /messages/{message_id}/read` - Mark message as read
-- `DELETE /messages/{message_id}` - Delete message (sender or recipient)
+- `DELETE /messages/{message_id}` - Delete message (sender only)
 
 ### Community & Trust System (🔒 Protected Routes)
 
@@ -359,6 +363,52 @@ curl -X DELETE "http://localhost:8000/messages/1" \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
+### 20a. Send Message in Existing Conversation
+
+```bash
+# Send a reply in an existing conversation
+curl -X POST "http://localhost:8000/conversations/16/messages" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "content": "Thanks for your interest! Yes, I have a dining table available."
+     }'
+```
+
+### 20b. Send Message Using General Endpoint (Conversation)
+
+```bash
+# Send message using the general endpoint with conversation_id
+curl -X POST "http://localhost:8000/messages" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "content": "What time would be good to come by?",
+       "conversation_id": 16
+     }'
+```
+
+### 20c. Send Message Using General Endpoint (Yard Sale)
+
+```bash
+# Send message using the general endpoint with yard_sale_id
+curl -X POST "http://localhost:8000/messages" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "content": "Hi! I am interested in your yard sale. Do you have any electronics?",
+       "yard_sale_id": 1
+     }'
+```
+
+### 20d. Get Messages for Specific Conversation
+
+```bash
+# Get all messages in a specific conversation
+curl -X GET "http://localhost:8000/conversations/16/messages" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ## Yard Sale Status Management
 
 ### 21. Update Yard Sale Status
@@ -600,6 +650,15 @@ curl -X DELETE "http://localhost:8000/yard-sales/1/visit" \
 - `user_id`: ID of the user who wrote the comment
 - `username`: Username of the comment author
 - `yard_sale_id`: ID of the yard sale this comment belongs to
+
+### Message Create
+
+- `content`: Message content (required, 1-1000 characters)
+- `recipient_id`: ID of the user receiving the message (optional, for yard sale messages)
+- `yard_sale_id`: ID of the yard sale (optional, for starting new conversations)
+- `conversation_id`: ID of the conversation (optional, for replying in existing conversations)
+
+**Note**: Either `yard_sale_id` OR `conversation_id` must be provided, but not both.
 
 ### Message
 

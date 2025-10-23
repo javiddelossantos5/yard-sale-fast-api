@@ -281,7 +281,9 @@ class CommentResponse(BaseModel):
 # Message Models
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000, description="Message content")
-    recipient_id: int = Field(..., description="ID of the user receiving the message")
+    recipient_id: Optional[int] = Field(None, description="ID of the user receiving the message (for yard sale messages)")
+    yard_sale_id: Optional[int] = Field(None, description="ID of the yard sale (for starting new conversations)")
+    conversation_id: Optional[int] = Field(None, description="ID of the conversation (for replying in existing conversations)")
 
 class ConversationResponse(BaseModel):
     id: int
@@ -1160,8 +1162,9 @@ async def send_message(
     if not yard_sale:
         raise HTTPException(status_code=404, detail="Yard sale not found")
     
-    # Check if recipient exists
-    recipient = db.query(User).filter(User.id == message_data.recipient_id).first()
+    # Determine recipient - use provided recipient_id or default to yard sale owner
+    recipient_id = message_data.recipient_id if message_data.recipient_id else yard_sale.owner_id
+    recipient = db.query(User).filter(User.id == recipient_id).first()
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
     
@@ -1170,14 +1173,14 @@ async def send_message(
         raise HTTPException(status_code=400, detail="This yard sale does not allow messages")
     
     # Get or create conversation between the two users
-    conversation = get_or_create_conversation(db, yard_sale_id, current_user.id, message_data.recipient_id)
+    conversation = get_or_create_conversation(db, yard_sale_id, current_user.id, recipient_id)
     
     # Create the message
     message = Message(
         content=message_data.content,
         conversation_id=conversation.id,
         sender_id=current_user.id,
-        recipient_id=message_data.recipient_id
+        recipient_id=recipient_id
     )
     
     db.add(message)
@@ -1337,6 +1340,59 @@ async def get_conversation_messages(
     
     return result
 
+# Send a message in a conversation
+@app.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
+async def send_conversation_message(
+    conversation_id: int,
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message in an existing conversation"""
+    # Check if conversation exists and user is a participant
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Check if current user is a participant in this conversation
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=403, detail="You are not a participant in this conversation")
+    
+    # Determine the recipient (the other participant)
+    recipient_id = conversation.participant2_id if current_user.id == conversation.participant1_id else conversation.participant1_id
+    
+    # Create the message
+    message = Message(
+        content=message_data.content,
+        sender_id=current_user.id,
+        recipient_id=recipient_id,
+        conversation_id=conversation_id,
+        is_read=False
+    )
+    
+    db.add(message)
+    
+    # Update conversation's updated_at timestamp
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(message)
+    
+    # Get recipient info for response
+    recipient = db.query(User).filter(User.id == recipient_id).first()
+    
+    return MessageResponse(
+        id=message.id,
+        content=message.content,
+        is_read=message.is_read,
+        created_at=message.created_at,
+        conversation_id=message.conversation_id,
+        sender_id=message.sender_id,
+        sender_username=current_user.username,
+        recipient_id=message.recipient_id,
+        recipient_username=recipient.username
+    )
+
 # Get all messages for current user (inbox)
 @app.get("/messages", response_model=List[MessageResponse])
 async def get_user_messages(
@@ -1422,6 +1478,109 @@ async def delete_message(
     db.commit()
     
     return {"message": "Message deleted successfully"}
+
+# General message sending endpoint (alternative to yard-sale specific)
+@app.post("/messages", response_model=MessageResponse)
+async def send_message_general(
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message - requires either yard_sale_id or conversation_id in the request body"""
+    if not message_data.yard_sale_id and not message_data.conversation_id:
+        raise HTTPException(
+            status_code=400, 
+            detail="Either yard_sale_id or conversation_id must be provided"
+        )
+    
+    if message_data.yard_sale_id and message_data.conversation_id:
+        raise HTTPException(
+            status_code=400, 
+            detail="Provide either yard_sale_id or conversation_id, not both"
+        )
+    
+    if message_data.yard_sale_id:
+        # Use the existing yard sale messaging logic
+        yard_sale = db.query(YardSale).filter(YardSale.id == message_data.yard_sale_id).first()
+        if not yard_sale:
+            raise HTTPException(status_code=404, detail="Yard sale not found")
+        
+        # Get or create conversation
+        conversation = get_or_create_conversation(db, message_data.yard_sale_id, current_user.id, yard_sale.owner_id)
+        
+        # Determine recipient
+        recipient_id = yard_sale.owner_id if current_user.id != yard_sale.owner_id else current_user.id
+        
+        # Create message
+        message = Message(
+            content=message_data.content,
+            sender_id=current_user.id,
+            recipient_id=recipient_id,
+            conversation_id=conversation.id,
+            is_read=False
+        )
+        
+        db.add(message)
+        conversation.updated_at = get_mountain_time()
+        db.commit()
+        db.refresh(message)
+        
+        # Get recipient info
+        recipient = db.query(User).filter(User.id == recipient_id).first()
+        
+        return MessageResponse(
+            id=message.id,
+            content=message.content,
+            is_read=message.is_read,
+            created_at=message.created_at,
+            conversation_id=message.conversation_id,
+            sender_id=message.sender_id,
+            sender_username=current_user.username,
+            recipient_id=message.recipient_id,
+            recipient_username=recipient.username
+        )
+    
+    else:  # conversation_id provided
+        # Use the conversation messaging logic
+        conversation = db.query(Conversation).filter(Conversation.id == message_data.conversation_id).first()
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Check if current user is a participant
+        if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+            raise HTTPException(status_code=403, detail="You are not a participant in this conversation")
+        
+        # Determine recipient
+        recipient_id = conversation.participant2_id if current_user.id == conversation.participant1_id else conversation.participant1_id
+        
+        # Create message
+        message = Message(
+            content=message_data.content,
+            sender_id=current_user.id,
+            recipient_id=recipient_id,
+            conversation_id=conversation.id,
+            is_read=False
+        )
+        
+        db.add(message)
+        conversation.updated_at = get_mountain_time()
+        db.commit()
+        db.refresh(message)
+        
+        # Get recipient info
+        recipient = db.query(User).filter(User.id == recipient_id).first()
+        
+        return MessageResponse(
+            id=message.id,
+            content=message.content,
+            is_read=message.is_read,
+            created_at=message.created_at,
+            conversation_id=message.conversation_id,
+            sender_id=message.sender_id,
+            sender_username=current_user.username,
+            recipient_id=message.recipient_id,
+            recipient_username=recipient.username
+        )
 
 # ============================================================================
 # TRUST SYSTEM ENDPOINTS
