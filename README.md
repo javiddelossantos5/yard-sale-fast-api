@@ -91,6 +91,14 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - `GET /yard-sales?include_visited_status=true` - Get yard sales with visited status
 - `GET /yard-sales/{id}/visit-stats` - Get visit statistics for a yard sale
 
+#### Enhanced Messaging & Notification System
+
+- `GET /messages?include_notification_status=true` - Get messages with notification status
+- `POST /messages/mark-read` - Bulk mark messages as read
+- `WS /ws/messages/{user_id}` - WebSocket for real-time notifications
+- `GET /notifications/counts?type=message` - Get message-specific notification counts
+- `GET /conversations/summaries` - Get conversation summaries with unread counts
+
 #### Notification System
 
 - `GET /notifications` - Get user's notifications
@@ -587,9 +595,136 @@ curl -X DELETE "http://localhost:8000/yard-sales/1/visit" \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
+## Enhanced Messaging & Notification System Examples
+
+### 36. Enhanced Messages API with Notification Status
+
+```bash
+# Get messages with notification status
+curl -X GET "http://localhost:8000/messages?include_notification_status=true" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Response includes notification_id and has_unread_notification for each message
+{
+  "messages": [
+    {
+      "id": 1,
+      "content": "Hello",
+      "sender_id": 2,
+      "sender_username": "user2",
+      "recipient_id": 1,
+      "recipient_username": "user1",
+      "conversation_id": 5,
+      "is_read": false,
+      "created_at": "2025-01-23T10:00:00Z",
+      "notification_id": 123,
+      "has_unread_notification": true
+    }
+  ],
+  "unread_message_count": 3,
+  "total_messages": 15
+}
+```
+
+### 37. Bulk Mark Messages as Read
+
+```bash
+# Mark specific messages as read
+curl -X POST "http://localhost:8000/messages/mark-read" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "message_ids": [1, 2, 3, 4]
+     }'
+
+# Mark all messages in a conversation as read
+curl -X POST "http://localhost:8000/messages/mark-read" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -d '{
+       "conversation_id": 5
+     }'
+
+# Response
+{
+  "marked_count": 4,
+  "updated_notifications": [123, 124, 125, 126]
+}
+```
+
+### 38. Real-time WebSocket Notifications
+
+```javascript
+// Connect to WebSocket for real-time notifications
+const ws = new WebSocket('ws://localhost:8000/ws/messages/1');
+
+ws.onmessage = function(event) {
+  const data = JSON.parse(event.data);
+
+  if (data.type === 'new_notification') {
+    console.log('New notification:', data.data.notification);
+    // Update UI with new notification
+  }
+};
+
+// WebSocket events received:
+{
+  "type": "new_notification",
+  "data": {
+    "notification": {
+      "id": 123,
+      "type": "message",
+      "title": "New message from user2",
+      "message": "You received a message: \"Hello there!\"",
+      "created_at": "2025-01-23T10:00:00Z",
+      "is_read": false
+    }
+  }
+}
+```
+
+### 39. Optimized Notification Counts
+
+```bash
+# Get message-specific notification counts
+curl -X GET "http://localhost:8000/notifications/counts?type=message" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Response
+{
+  "unread_message_notifications": 3,
+  "total_message_notifications": 15,
+  "last_updated": "2025-01-23T10:00:00Z"
+}
+```
+
+### 40. Conversation Summaries
+
+```bash
+# Get conversation summaries with unread counts
+curl -X GET "http://localhost:8000/conversations/summaries" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Response
+{
+  "conversations": [
+    {
+      "conversation_id": 5,
+      "other_user_id": 2,
+      "other_username": "user2",
+      "last_message": "Hello there!",
+      "last_message_time": "2025-01-23T10:00:00Z",
+      "unread_count": 2,
+      "total_messages": 15
+    }
+  ],
+  "total_unread": 3
+}
+```
+
 ## Notification System Examples
 
-### 36. Get User's Notifications
+### 41. Get User's Notifications
 
 ```bash
 # Get all notifications for the current user

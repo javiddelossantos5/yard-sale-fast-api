@@ -1,11 +1,12 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Form
+from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uvicorn
 from datetime import datetime, timedelta
 import pytz
+import json
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
@@ -312,6 +313,8 @@ class MessageResponse(BaseModel):
     sender_username: str
     recipient_id: int
     recipient_username: str
+    notification_id: Optional[int] = None  # NEW: Link to notification
+    has_unread_notification: bool = False  # NEW: Quick check
 
 # Trust System Models
 class UserRatingCreate(BaseModel):
@@ -421,8 +424,77 @@ class NotificationCountResponse(BaseModel):
     total_notifications: int
     unread_notifications: int
 
+# Enhanced Messaging Models
+class MessagesWithNotificationStatus(BaseModel):
+    messages: List[MessageResponse]
+    unread_message_count: int
+    total_messages: int
+
+class BulkMarkReadRequest(BaseModel):
+    message_ids: List[int]
+    conversation_id: Optional[int] = None
+
+class BulkMarkReadResponse(BaseModel):
+    marked_count: int
+    updated_notifications: List[int]
+
+class MessageNotificationCounts(BaseModel):
+    unread_message_notifications: int
+    total_message_notifications: int
+    last_updated: datetime
+
+class ConversationSummary(BaseModel):
+    conversation_id: int
+    other_user_id: int
+    other_username: str
+    last_message: Optional[str]
+    last_message_time: Optional[datetime]
+    unread_count: int
+    total_messages: int
+
+class ConversationSummariesResponse(BaseModel):
+    conversations: List[ConversationSummary]
+    total_unread: int
+
 # Token blacklist for logout functionality
 token_blacklist = set()
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, WebSocket] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: int):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+
+    def disconnect(self, user_id: int):
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+
+    async def send_personal_message(self, message: dict, user_id: int):
+        if user_id in self.active_connections:
+            websocket = self.active_connections[user_id]
+            try:
+                await websocket.send_text(json.dumps(message))
+            except:
+                # Connection closed, remove it
+                self.disconnect(user_id)
+
+    async def broadcast(self, message: dict):
+        for user_id, websocket in self.active_connections.items():
+            try:
+                await websocket.send_text(json.dumps(message))
+            except:
+                # Connection closed, remove it
+                self.disconnect(user_id)
+
+manager = ConnectionManager()
+
+# WebSocket event models
+class WebSocketEvent(BaseModel):
+    type: str
+    data: dict
 
 # Conversation helper functions
 def get_or_create_conversation(db: Session, yard_sale_id: int, user1_id: int, user2_id: int) -> Conversation:
@@ -482,7 +554,40 @@ def create_notification(
     db.add(notification)
     db.commit()
     db.refresh(notification)
+    
+    # Send real-time WebSocket notification
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If we're in an async context, schedule the coroutine
+            asyncio.create_task(send_websocket_notification(user_id, notification))
+        else:
+            # If we're not in an async context, run it
+            loop.run_until_complete(send_websocket_notification(user_id, notification))
+    except:
+        # If WebSocket fails, continue without error
+        pass
+    
     return notification
+
+async def send_websocket_notification(user_id: int, notification: Notification):
+    """Send real-time notification via WebSocket"""
+    websocket_message = {
+        "type": "new_notification",
+        "data": {
+            "notification": {
+                "id": notification.id,
+                "type": notification.type,
+                "title": notification.title,
+                "message": notification.message,
+                "created_at": notification.created_at.isoformat(),
+                "is_read": notification.is_read
+            }
+        }
+    }
+    
+    await manager.send_personal_message(websocket_message, user_id)
 
 # Authentication utility functions
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -1358,6 +1463,87 @@ async def get_user_conversations(
     
     return result
 
+# Get conversation summaries with unread counts
+@app.get("/conversations/summaries", response_model=ConversationSummariesResponse)
+async def get_conversation_summaries(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get conversation summaries with unread counts and last message info"""
+    # Get conversations where user is either participant1 or participant2
+    conversations = db.query(Conversation).filter(
+        (Conversation.participant1_id == current_user.id) | 
+        (Conversation.participant2_id == current_user.id)
+    ).order_by(Conversation.updated_at.desc()).all()
+    
+    result = []
+    total_unread = 0
+    
+    for conv in conversations:
+        # Determine the other user
+        if conv.participant1_id == current_user.id:
+            other_user_id = conv.participant2_id
+        else:
+            other_user_id = conv.participant1_id
+        
+        # Get other user info
+        other_user = db.query(User).filter(User.id == other_user_id).first()
+        
+        # Get last message
+        last_message = db.query(Message).filter(
+            Message.conversation_id == conv.id
+        ).order_by(Message.created_at.desc()).first()
+        
+        # Count unread messages for current user
+        unread_count = db.query(Message).filter(
+            Message.conversation_id == conv.id,
+            Message.recipient_id == current_user.id,
+            Message.is_read == False
+        ).count()
+        
+        # Count total messages in conversation
+        total_messages = db.query(Message).filter(
+            Message.conversation_id == conv.id
+        ).count()
+        
+        total_unread += unread_count
+        
+        result.append(ConversationSummary(
+            conversation_id=conv.id,
+            other_user_id=other_user_id,
+            other_username=other_user.username if other_user else "Unknown",
+            last_message=last_message.content if last_message else None,
+            last_message_time=last_message.created_at if last_message else None,
+            unread_count=unread_count,
+            total_messages=total_messages
+        ))
+    
+    return ConversationSummariesResponse(
+        conversations=result,
+        total_unread=total_unread
+    )
+
+# WebSocket endpoint for real-time message updates
+@app.websocket("/ws/messages/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    """WebSocket endpoint for real-time message notifications"""
+    # Verify user exists
+    db = next(get_db())
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        await websocket.close(code=4004, reason="User not found")
+        return
+    
+    await manager.connect(websocket, user_id)
+    try:
+        while True:
+            # Keep connection alive and handle any incoming messages
+            data = await websocket.receive_text()
+            # For now, just echo back (can be extended for other real-time features)
+            await websocket.send_text(f"Echo: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(user_id)
+
 # Get messages for a specific conversation
 @app.get("/conversations/{conversation_id}/messages", response_model=List[MessageResponse])
 async def get_conversation_messages(
@@ -1467,20 +1653,41 @@ async def send_conversation_message(
     )
 
 # Get all messages for current user (inbox)
-@app.get("/messages", response_model=List[MessageResponse])
+@app.get("/messages", response_model=MessagesWithNotificationStatus)
 async def get_user_messages(
+    include_notification_status: bool = False,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Get all messages for the current user (both sent and received)"""
+    """Get all messages for the current user with optional notification status"""
     messages = db.query(Message).filter(
         (Message.sender_id == current_user.id) | (Message.recipient_id == current_user.id)
     ).order_by(Message.created_at.desc()).all()
     
     result = []
+    unread_count = 0
+    
     for message in messages:
         sender = db.query(User).filter(User.id == message.sender_id).first()
         recipient = db.query(User).filter(User.id == message.recipient_id).first()
+        
+        # Get notification info if requested
+        notification_id = None
+        has_unread_notification = False
+        
+        if include_notification_status:
+            notification = db.query(Notification).filter(
+                Notification.related_message_id == message.id,
+                Notification.user_id == current_user.id
+            ).first()
+            
+            if notification:
+                notification_id = notification.id
+                has_unread_notification = not notification.is_read
+        
+        # Count unread messages (received but not read)
+        if message.recipient_id == current_user.id and not message.is_read:
+            unread_count += 1
         
         result.append(MessageResponse(
             id=message.id,
@@ -1491,10 +1698,83 @@ async def get_user_messages(
             sender_id=message.sender_id,
             sender_username=sender.username,
             recipient_id=message.recipient_id,
-            recipient_username=recipient.username
+            recipient_username=recipient.username,
+            notification_id=notification_id,
+            has_unread_notification=has_unread_notification
         ))
     
-    return result
+    return MessagesWithNotificationStatus(
+        messages=result,
+        unread_message_count=unread_count,
+        total_messages=len(result)
+    )
+
+# Bulk mark messages as read
+@app.post("/messages/mark-read", response_model=BulkMarkReadResponse)
+async def bulk_mark_messages_read(
+    request: BulkMarkReadRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark multiple messages as read in one call"""
+    marked_count = 0
+    updated_notifications = []
+    
+    if request.conversation_id:
+        # Mark all messages in conversation as read
+        messages = db.query(Message).filter(
+            Message.conversation_id == request.conversation_id,
+            Message.recipient_id == current_user.id,
+            Message.is_read == False
+        ).all()
+        
+        for message in messages:
+            message.is_read = True
+            marked_count += 1
+            
+            # Mark related notification as read
+            notification = db.query(Notification).filter(
+                Notification.related_message_id == message.id,
+                Notification.user_id == current_user.id,
+                Notification.is_read == False
+            ).first()
+            
+            if notification:
+                notification.is_read = True
+                notification.read_at = get_mountain_time()
+                updated_notifications.append(notification.id)
+    
+    else:
+        # Mark specific messages as read
+        for message_id in request.message_ids:
+            message = db.query(Message).filter(
+                Message.id == message_id,
+                Message.recipient_id == current_user.id,
+                Message.is_read == False
+            ).first()
+            
+            if message:
+                message.is_read = True
+                marked_count += 1
+                
+                # Mark related notification as read
+                notification = db.query(Notification).filter(
+                    Notification.related_message_id == message.id,
+                    Notification.user_id == current_user.id,
+                    Notification.is_read == False
+                ).first()
+                
+                if notification:
+                    notification.is_read = True
+                    notification.read_at = get_mountain_time()
+                    updated_notifications.append(notification.id)
+    
+    db.commit()
+    
+    return BulkMarkReadResponse(
+        marked_count=marked_count,
+        updated_notifications=updated_notifications
+    )
 
 # Get unread messages count
 @app.get("/messages/unread-count")
@@ -2346,6 +2626,43 @@ async def get_notification_count(
     return NotificationCountResponse(
         total_notifications=total_notifications,
         unread_notifications=unread_notifications
+    )
+
+# Get message-specific notification counts
+@app.get("/notifications/counts", response_model=MessageNotificationCounts)
+async def get_message_notification_counts(
+    type: str = "message",
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get notification counts for specific types (e.g., message notifications)"""
+    if type != "message":
+        raise HTTPException(status_code=400, detail="Only 'message' type is currently supported")
+    
+    # Get message notification counts
+    total_message_notifications = db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.type == "message"
+    ).count()
+    
+    unread_message_notifications = db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.type == "message",
+        Notification.is_read == False
+    ).count()
+    
+    # Get last updated time
+    last_notification = db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.type == "message"
+    ).order_by(Notification.created_at.desc()).first()
+    
+    last_updated = last_notification.created_at if last_notification else get_mountain_time()
+    
+    return MessageNotificationCounts(
+        unread_message_notifications=unread_message_notifications,
+        total_message_notifications=total_message_notifications,
+        last_updated=last_updated
     )
 
 @app.put("/notifications/{notification_id}/read")
