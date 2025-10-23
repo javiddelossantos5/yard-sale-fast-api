@@ -11,6 +11,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
+import uuid
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
 from contextlib import asynccontextmanager
 from datetime import date, time
@@ -121,7 +122,7 @@ class UserCreate(UserBase):
     permissions: UserPermission = Field(UserPermission.USER, description="User permission level")
 
 class UserResponse(UserBase):
-    id: int
+    id: str
     full_name: Optional[str]
     phone_number: Optional[str]
     city: Optional[str]
@@ -162,13 +163,13 @@ class ItemCreate(BaseModel):
     is_available: bool = True
 
 class ItemResponse(BaseModel):
-    id: int
+    id: str
     name: str
     description: Optional[str]
     price: float
     is_available: bool
     created_at: datetime
-    owner_id: int
+    owner_id: str
 
 class ItemUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -241,7 +242,7 @@ class YardSaleUpdate(BaseModel):
     status: Optional[YardSaleStatus] = Field(None, description="Yard sale status: active, closed, on_break")
 
 class YardSaleResponse(BaseModel):
-    id: int
+    id: str
     title: str
     description: Optional[str]
     start_date: date
@@ -268,7 +269,7 @@ class YardSaleResponse(BaseModel):
     status: YardSaleStatus
     created_at: datetime
     updated_at: datetime
-    owner_id: int
+    owner_id: str
     owner_username: str
     comment_count: int = 0
     is_visited: Optional[bool] = None
@@ -280,28 +281,28 @@ class CommentCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000, description="Comment content")
 
 class CommentResponse(BaseModel):
-    id: int
+    id: str
     content: str
     created_at: datetime
     updated_at: datetime
-    user_id: int
+    user_id: str
     username: str
-    yard_sale_id: int
+    yard_sale_id: str
 
 # Message Models
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000, description="Message content")
-    recipient_id: Optional[int] = Field(None, description="ID of the user receiving the message (for yard sale messages)")
-    yard_sale_id: Optional[int] = Field(None, description="ID of the yard sale (for starting new conversations)")
-    conversation_id: Optional[int] = Field(None, description="ID of the conversation (for replying in existing conversations)")
+    recipient_id: Optional[str] = Field(None, description="ID of the user receiving the message (for yard sale messages)")
+    yard_sale_id: Optional[str] = Field(None, description="ID of the yard sale (for starting new conversations)")
+    conversation_id: Optional[str] = Field(None, description="ID of the conversation (for replying in existing conversations)")
 
 class ConversationResponse(BaseModel):
-    id: int
-    yard_sale_id: int
+    id: str
+    yard_sale_id: str
     yard_sale_title: str
-    participant1_id: int
+    participant1_id: str
     participant1_username: str
-    participant2_id: int
+    participant2_id: str
     participant2_username: str
     last_message: Optional[str] = None
     last_message_time: Optional[datetime] = None
@@ -313,39 +314,39 @@ class ConversationResponse(BaseModel):
         from_attributes = True
 
 class MessageResponse(BaseModel):
-    id: int
+    id: str
     content: str
     is_read: bool
     created_at: datetime
-    conversation_id: int
-    sender_id: int
+    conversation_id: str
+    sender_id: str
     sender_username: str
-    recipient_id: int
+    recipient_id: str
     recipient_username: str
-    notification_id: Optional[int] = None  # NEW: Link to notification
+    notification_id: Optional[str] = None  # NEW: Link to notification
     has_unread_notification: bool = False  # NEW: Quick check
 
 # Trust System Models
 class UserRatingCreate(BaseModel):
     rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
     review_text: Optional[str] = Field(None, max_length=1000, description="Optional review text")
-    yard_sale_id: Optional[int] = Field(None, description="Optional yard sale ID if rating is related to a specific sale")
-    rated_user_id: Optional[int] = Field(None, description="ID of the user being rated (required for /ratings endpoint)")
+    yard_sale_id: Optional[str] = Field(None, description="Optional yard sale ID if rating is related to a specific sale")
+    rated_user_id: Optional[str] = Field(None, description="ID of the user being rated (required for /ratings endpoint)")
 
 class UserRatingResponse(BaseModel):
-    id: int
+    id: str
     rating: int
     review_text: Optional[str]
     created_at: datetime
-    reviewer_id: int
+    reviewer_id: str
     reviewer_username: str
-    rated_user_id: int
+    rated_user_id: str
     rated_user_username: str
-    yard_sale_id: Optional[int]
+    yard_sale_id: Optional[str]
     yard_sale_title: Optional[str]
 
 class UserProfileResponse(BaseModel):
-    id: int
+    id: str
     username: str
     email: str
     full_name: Optional[str]
@@ -367,38 +368,38 @@ class UserProfileResponse(BaseModel):
 class ReportCreate(BaseModel):
     report_type: str = Field(..., description="Type of report: scam, inappropriate, spam, other")
     description: str = Field(..., min_length=10, max_length=1000, description="Detailed description of the issue")
-    reported_user_id: Optional[int] = Field(None, description="ID of user being reported")
-    reported_yard_sale_id: Optional[int] = Field(None, description="ID of yard sale being reported")
+    reported_user_id: Optional[str] = Field(None, description="ID of user being reported")
+    reported_yard_sale_id: Optional[str] = Field(None, description="ID of yard sale being reported")
 
 class ReportResponse(BaseModel):
-    id: int
+    id: str
     report_type: str
     description: str
     status: str
     created_at: datetime
-    reporter_id: int
+    reporter_id: str
     reporter_username: str
-    reported_user_id: Optional[int]
+    reported_user_id: Optional[str]
     reported_user_username: Optional[str]
-    reported_yard_sale_id: Optional[int]
+    reported_yard_sale_id: Optional[str]
     reported_yard_sale_title: Optional[str]
 
 class VerificationCreate(BaseModel):
     verification_type: str = Field(..., description="Type of verification: email, phone, identity, address")
 
 class VerificationResponse(BaseModel):
-    id: int
+    id: str
     verification_type: str
     status: str
     verified_at: Optional[datetime]
     created_at: datetime
-    user_id: int
+    user_id: str
     user_username: str
 
 # Visit Tracking Models
 class VisitedYardSaleResponse(BaseModel):
-    id: int
-    yard_sale_id: int
+    id: str
+    yard_sale_id: str
     yard_sale_title: str
     visited_at: datetime
     visit_count: int
@@ -406,7 +407,7 @@ class VisitedYardSaleResponse(BaseModel):
     created_at: datetime
 
 class VisitStatsResponse(BaseModel):
-    yard_sale_id: int
+    yard_sale_id: str
     yard_sale_title: str
     total_visits: int
     unique_visitors: int
@@ -415,19 +416,19 @@ class VisitStatsResponse(BaseModel):
 
 # Notification Models
 class NotificationResponse(BaseModel):
-    id: int
+    id: str
     type: str
     title: str
     message: str
     is_read: bool
     created_at: datetime
     read_at: Optional[datetime]
-    user_id: int
-    related_user_id: Optional[int]
+    user_id: str
+    related_user_id: Optional[str]
     related_user_username: Optional[str]
-    related_yard_sale_id: Optional[int]
+    related_yard_sale_id: Optional[str]
     related_yard_sale_title: Optional[str]
-    related_message_id: Optional[int]
+    related_message_id: Optional[str]
 
 class NotificationCountResponse(BaseModel):
     total_notifications: int
@@ -453,8 +454,8 @@ class MessageNotificationCounts(BaseModel):
     last_updated: datetime
 
 class ConversationSummary(BaseModel):
-    conversation_id: int
-    other_user_id: int
+    conversation_id: str
+    other_user_id: str
     other_username: str
     last_message: Optional[str]
     last_message_time: Optional[datetime]
@@ -471,17 +472,17 @@ token_blacklist = set()
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[int, WebSocket] = {}
+        self.active_connections: Dict[str, WebSocket] = {}
 
-    async def connect(self, websocket: WebSocket, user_id: int):
+    async def connect(self, websocket: WebSocket, user_id: str):
         await websocket.accept()
         self.active_connections[user_id] = websocket
 
-    def disconnect(self, user_id: int):
+    def disconnect(self, user_id: str):
         if user_id in self.active_connections:
             del self.active_connections[user_id]
 
-    async def send_personal_message(self, message: dict, user_id: int):
+    async def send_personal_message(self, message: dict, user_id: str):
         if user_id in self.active_connections:
             websocket = self.active_connections[user_id]
             try:
@@ -506,7 +507,7 @@ class WebSocketEvent(BaseModel):
     data: dict
 
 # Conversation helper functions
-def get_or_create_conversation(db: Session, yard_sale_id: int, user1_id: int, user2_id: int) -> Conversation:
+def get_or_create_conversation(db: Session, yard_sale_id: str, user1_id: str, user2_id: str) -> Conversation:
     """Get existing conversation or create a new one between two users for a yard sale"""
     # Ensure consistent ordering (smaller ID first)
     participant1_id = min(user1_id, user2_id)
@@ -541,11 +542,11 @@ def get_or_create_conversation(db: Session, yard_sale_id: int, user1_id: int, us
 # Notification helper functions
 def create_notification(
     db: Session,
-    user_id: int,
+    user_id: str,
     notification_type: str,
     title: str,
     message: str,
-    related_user_id: Optional[int] = None,
+    related_user_id: Optional[str] = None,
     related_yard_sale_id: Optional[int] = None,
     related_message_id: Optional[int] = None
 ):
@@ -580,7 +581,7 @@ def create_notification(
     
     return notification
 
-async def send_websocket_notification(user_id: int, notification: Notification):
+async def send_websocket_notification(user_id: str, notification: Notification):
     """Send real-time notification via WebSocket"""
     websocket_message = {
         "type": "new_notification",
@@ -647,7 +648,7 @@ def get_user_by_username(db: Session, username: str):
         (User.username == username) | (User.email == username)
     ).first()
 
-def get_user_by_id(db: Session, user_id: int):
+def get_user_by_id(db: Session, user_id: str):
     """Get user by ID"""
     return db.query(User).filter(User.id == user_id).first()
 
@@ -915,7 +916,7 @@ async def get_items(current_user: User = Depends(get_current_active_user), db: S
 
 # GET item by ID (protected route)
 @app.get("/items/{item_id}", response_model=ItemResponse)
-async def get_item(item_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def get_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Get a specific item by ID (only if owned by current user)"""
     item = db.query(Item).filter(
         Item.id == item_id, 
@@ -950,7 +951,7 @@ async def create_item(item: ItemCreate, current_user: User = Depends(get_current
 
 # PUT update item (protected route)
 @app.put("/items/{item_id}", response_model=ItemResponse)
-async def update_item(item_id: int, item_update: ItemUpdate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def update_item(item_id: str, item_update: ItemUpdate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Update an existing item (only if owned by current user)"""
     item = db.query(Item).filter(
         Item.id == item_id, 
@@ -975,7 +976,7 @@ async def update_item(item_id: int, item_update: ItemUpdate, current_user: User 
 
 # DELETE item (protected route)
 @app.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_item(item_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def delete_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Delete an item (only if owned by current user)"""
     item = db.query(Item).filter(
         Item.id == item_id, 
@@ -1142,7 +1143,7 @@ async def get_yard_sales(
     return result
 
 @app.get("/yard-sales/{yard_sale_id}", response_model=YardSaleResponse)
-async def get_yard_sale(yard_sale_id: int, db: Session = Depends(get_db)):
+async def get_yard_sale(yard_sale_id: str, db: Session = Depends(get_db)):
     """Get a specific yard sale by ID"""
     yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
     
@@ -1163,7 +1164,7 @@ async def get_yard_sale(yard_sale_id: int, db: Session = Depends(get_db)):
 
 @app.put("/yard-sales/{yard_sale_id}", response_model=YardSaleResponse)
 async def update_yard_sale(
-    yard_sale_id: int, 
+    yard_sale_id: str, 
     yard_sale_update: YardSaleUpdate, 
     current_user: User = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
@@ -1203,7 +1204,7 @@ async def update_yard_sale(
 
 @app.delete("/yard-sales/{yard_sale_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_yard_sale(
-    yard_sale_id: int, 
+    yard_sale_id: str, 
     current_user: User = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
 ):
@@ -1257,7 +1258,7 @@ async def search_nearby_yard_sales(
 # Comment Endpoints
 @app.post("/yard-sales/{yard_sale_id}/comments", response_model=CommentResponse, status_code=status.HTTP_201_CREATED)
 async def create_comment(
-    yard_sale_id: int,
+    yard_sale_id: str,
     comment: CommentCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -1287,7 +1288,7 @@ async def create_comment(
     )
 
 @app.get("/yard-sales/{yard_sale_id}/comments", response_model=List[CommentResponse])
-async def get_comments(yard_sale_id: int, db: Session = Depends(get_db)):
+async def get_comments(yard_sale_id: str, db: Session = Depends(get_db)):
     """Get all comments for a yard sale"""
     # Check if yard sale exists
     yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
@@ -1305,7 +1306,7 @@ async def get_comments(yard_sale_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_comment(
-    comment_id: int,
+    comment_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -1333,7 +1334,7 @@ async def delete_comment(
 # Send a message to yard sale owner
 @app.post("/yard-sales/{yard_sale_id}/messages", response_model=MessageResponse)
 async def send_message(
-    yard_sale_id: int,
+    yard_sale_id: str,
     message_data: MessageCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -1397,7 +1398,7 @@ async def send_message(
 # Get messages for a specific yard sale (conversation)
 @app.get("/yard-sales/{yard_sale_id}/messages", response_model=List[MessageResponse])
 async def get_yard_sale_messages(
-    yard_sale_id: int,
+    yard_sale_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -1555,7 +1556,7 @@ async def get_conversation_summaries(
 
 # WebSocket endpoint for real-time message updates
 @app.websocket("/ws/messages/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: int):
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """WebSocket endpoint for real-time message notifications"""
     # Verify user exists
     db = next(get_db())
@@ -1577,7 +1578,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
 # Get messages for a specific conversation
 @app.get("/conversations/{conversation_id}/messages", response_model=List[MessageResponse])
 async def get_conversation_messages(
-    conversation_id: int,
+    conversation_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -1619,7 +1620,7 @@ async def get_conversation_messages(
 # Send a message in a conversation
 @app.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
 async def send_conversation_message(
-    conversation_id: int,
+    conversation_id: str,
     message_data: MessageCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -1823,7 +1824,7 @@ async def get_unread_messages_count(
 # Mark message as read
 @app.put("/messages/{message_id}/read")
 async def mark_message_as_read(
-    message_id: int,
+    message_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -1844,7 +1845,7 @@ async def mark_message_as_read(
 # Delete message (sender or recipient can delete)
 @app.delete("/messages/{message_id}")
 async def delete_message(
-    message_id: int,
+    message_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -1998,7 +1999,7 @@ async def send_message_general(
 # User Rating and Review Endpoints
 @app.post("/users/{user_id}/ratings", response_model=UserRatingResponse)
 async def create_user_rating(
-    user_id: int,
+    user_id: str,
     rating_data: UserRatingCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -2068,7 +2069,7 @@ async def create_user_rating(
 
 @app.get("/api/users/{user_id}/ratings", response_model=List[UserRatingResponse])
 async def get_user_ratings(
-    user_id: int,
+    user_id: str,
     db: Session = Depends(get_db)
 ):
     """Get all ratings for a user"""
@@ -2102,7 +2103,7 @@ async def get_user_ratings(
 
 @app.get("/users/{user_id}/profile", response_model=UserProfileResponse)
 async def get_user_profile(
-    user_id: int,
+    user_id: str,
     db: Session = Depends(get_db)
 ):
     """Get user profile with trust metrics"""
@@ -2287,7 +2288,7 @@ async def get_user_verifications(
 # Additional User Profile Endpoints
 @app.get("/api/users/{user_id}", response_model=UserProfileResponse)
 async def get_user_by_id(
-    user_id: int,
+    user_id: str,
     db: Session = Depends(get_db)
 ):
     """Get detailed user profile by ID with trust metrics"""
@@ -2329,7 +2330,7 @@ async def get_user_by_id(
 
 @app.get("/users/{user_id}/verifications", response_model=List[VerificationResponse])
 async def get_user_verifications_by_id(
-    user_id: int,
+    user_id: str,
     db: Session = Depends(get_db)
 ):
     """Get all verifications for a specific user"""
@@ -2429,7 +2430,7 @@ async def create_rating(
 # Visit Tracking Endpoints
 @app.post("/yard-sales/{yard_sale_id}/visit", response_model=VisitedYardSaleResponse)
 async def mark_yard_sale_visited(
-    yard_sale_id: int,
+    yard_sale_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -2500,7 +2501,7 @@ async def mark_yard_sale_visited(
 
 @app.delete("/yard-sales/{yard_sale_id}/visit")
 async def mark_yard_sale_not_visited(
-    yard_sale_id: int,
+    yard_sale_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -2552,7 +2553,7 @@ async def get_user_visited_yard_sales(
 
 @app.get("/yard-sales/{yard_sale_id}/visit-stats", response_model=VisitStatsResponse)
 async def get_yard_sale_visit_stats(
-    yard_sale_id: int,
+    yard_sale_id: str,
     db: Session = Depends(get_db)
 ):
     """Get visit statistics for a specific yard sale"""
@@ -2697,7 +2698,7 @@ async def get_message_notification_counts(
 
 @app.put("/notifications/{notification_id}/read")
 async def mark_notification_read(
-    notification_id: int,
+    notification_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -2735,7 +2736,7 @@ async def mark_all_notifications_read(
 
 @app.delete("/notifications/{notification_id}")
 async def delete_notification(
-    notification_id: int,
+    notification_id: str,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -2784,7 +2785,7 @@ async def get_all_users(
 
 @app.get("/admin/users/{user_id}", response_model=UserResponse)
 async def get_user_by_id_admin(
-    user_id: int,
+    user_id: str,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
@@ -2822,7 +2823,7 @@ class UserUpdateAdmin(BaseModel):
 
 @app.put("/admin/users/{user_id}", response_model=UserResponse)
 async def update_user_admin(
-    user_id: int,
+    user_id: str,
     user_update: UserUpdateAdmin,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
@@ -2875,7 +2876,7 @@ async def update_user_admin(
 
 @app.delete("/admin/users/{user_id}")
 async def delete_user_admin(
-    user_id: int,
+    user_id: str,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):

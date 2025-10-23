@@ -1,8 +1,10 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Date, Time, JSON, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.dialects.mysql import CHAR
 from datetime import datetime
 import pytz
+import uuid
 
 def get_mountain_time():
     """Get current time in Mountain Time Zone (Vernal, Utah)"""
@@ -26,7 +28,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
@@ -70,13 +72,13 @@ class User(Base):
 class Item(Base):
     __tablename__ = "items"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String(100), nullable=False)
     description = Column(String(500), nullable=True)
     price = Column(Float, nullable=False)
     is_available = Column(Boolean, default=True)
     created_at = Column(DateTime, default=get_mountain_time)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     
     # Relationship with user
     owner = relationship("User", back_populates="items")
@@ -84,7 +86,7 @@ class Item(Base):
 class YardSale(Base):
     __tablename__ = "yard_sales"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     
     # Basic Information
     title = Column(String(200), nullable=False)
@@ -125,7 +127,7 @@ class YardSale(Base):
     status = Column(String(20), default="active", nullable=False)  # active, closed, on_break
     created_at = Column(DateTime, default=get_mountain_time)
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     
     # Relationships
     owner = relationship("User", back_populates="yard_sales")
@@ -138,14 +140,14 @@ class YardSale(Base):
 class Comment(Base):
     __tablename__ = "comments"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=get_mountain_time)
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Foreign Keys
-    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    yard_sale_id = Column(CHAR(36), ForeignKey("yard_sales.id"), nullable=False)
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     
     # Relationships
     yard_sale = relationship("YardSale", back_populates="comments")
@@ -154,10 +156,10 @@ class Comment(Base):
 class Conversation(Base):
     __tablename__ = "conversations"
     
-    id = Column(Integer, primary_key=True, index=True)
-    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
-    participant1_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    participant2_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    yard_sale_id = Column(CHAR(36), ForeignKey("yard_sales.id"), nullable=False)
+    participant1_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    participant2_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=get_mountain_time)
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
@@ -170,15 +172,15 @@ class Conversation(Base):
 class Message(Base):
     __tablename__ = "messages"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     content = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_mountain_time)
     
     # Foreign Keys
-    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
-    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    conversation_id = Column(CHAR(36), ForeignKey("conversations.id"), nullable=False)
+    sender_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
@@ -188,16 +190,16 @@ class Message(Base):
 class UserRating(Base):
     __tablename__ = "user_ratings"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     rating = Column(Integer, nullable=False)  # 1-5 stars
     review_text = Column(Text, nullable=True)  # Optional review text
     created_at = Column(DateTime, default=get_mountain_time)
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Foreign Keys
-    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User giving the rating
-    rated_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User being rated
-    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=True)  # Optional: related yard sale
+    reviewer_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # User giving the rating
+    rated_user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # User being rated
+    yard_sale_id = Column(CHAR(36), ForeignKey("yard_sales.id"), nullable=True)  # Optional: related yard sale
     
     # Relationships
     reviewer = relationship("User", foreign_keys=[reviewer_id], back_populates="ratings_given")
@@ -207,7 +209,7 @@ class UserRating(Base):
 class Report(Base):
     __tablename__ = "reports"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     report_type = Column(String(50), nullable=False)  # "scam", "inappropriate", "spam", "other"
     description = Column(Text, nullable=False)
     status = Column(String(20), default="pending")  # "pending", "reviewed", "resolved", "dismissed"
@@ -215,9 +217,9 @@ class Report(Base):
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Foreign Keys
-    reporter_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User making the report
-    reported_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User being reported
-    reported_yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=True)  # Yard sale being reported
+    reporter_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # User making the report
+    reported_user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=True)  # User being reported
+    reported_yard_sale_id = Column(CHAR(36), ForeignKey("yard_sales.id"), nullable=True)  # Yard sale being reported
     
     # Relationships
     reporter = relationship("User", foreign_keys=[reporter_id], back_populates="reports_made")
@@ -227,7 +229,7 @@ class Report(Base):
 class Verification(Base):
     __tablename__ = "verifications"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     verification_type = Column(String(50), nullable=False)  # "email", "phone", "identity", "address"
     status = Column(String(20), default="pending")  # "pending", "verified", "rejected"
     verified_at = Column(DateTime, nullable=True)
@@ -235,7 +237,7 @@ class Verification(Base):
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Foreign Keys
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     
     # Relationships
     user = relationship("User", back_populates="verifications")
@@ -243,7 +245,7 @@ class Verification(Base):
 class VisitedYardSale(Base):
     __tablename__ = "visited_yard_sales"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     visited_at = Column(DateTime, default=get_mountain_time)
     visit_count = Column(Integer, default=1)
     last_visited = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
@@ -251,8 +253,8 @@ class VisitedYardSale(Base):
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     
     # Foreign Keys
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    yard_sale_id = Column(CHAR(36), ForeignKey("yard_sales.id"), nullable=False)
     
     # Relationships
     user = relationship("User", back_populates="visited_yard_sales")
@@ -266,7 +268,7 @@ class VisitedYardSale(Base):
 class Notification(Base):
     __tablename__ = "notifications"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     type = Column(String(50), nullable=False)  # "message", "rating", "comment", "visit", etc.
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=False)
@@ -275,10 +277,10 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
     
     # Foreign Keys
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User receiving the notification
-    related_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User who triggered the notification
-    related_yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=True)  # Related yard sale
-    related_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)  # Related message
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # User receiving the notification
+    related_user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=True)  # User who triggered the notification
+    related_yard_sale_id = Column(CHAR(36), ForeignKey("yard_sales.id"), nullable=True)  # Related yard sale
+    related_message_id = Column(CHAR(36), ForeignKey("messages.id"), nullable=True)  # Related message
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="notifications")
