@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Date, Time, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Date, Time, JSON, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -59,6 +59,9 @@ class User(Base):
     reports_made = relationship("Report", foreign_keys="Report.reporter_id", back_populates="reporter")
     reports_received = relationship("Report", foreign_keys="Report.reported_user_id", back_populates="reported_user")
     verifications = relationship("Verification", back_populates="user")
+    
+    # Visit tracking relationships
+    visited_yard_sales = relationship("VisitedYardSale", back_populates="user")
 
 class Item(Base):
     __tablename__ = "items"
@@ -126,6 +129,7 @@ class YardSale(Base):
     conversations = relationship("Conversation", back_populates="yard_sale", cascade="all, delete-orphan")
     ratings = relationship("UserRating", back_populates="yard_sale")
     reports = relationship("Report", back_populates="reported_yard_sale")
+    visits = relationship("VisitedYardSale", back_populates="yard_sale")
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -231,6 +235,29 @@ class Verification(Base):
     
     # Relationships
     user = relationship("User", back_populates="verifications")
+
+class VisitedYardSale(Base):
+    __tablename__ = "visited_yard_sales"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    visited_at = Column(DateTime, default=get_mountain_time)
+    visit_count = Column(Integer, default=1)
+    last_visited = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Foreign Keys
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="visited_yard_sales")
+    yard_sale = relationship("YardSale", back_populates="visits")
+    
+    # Unique constraint to prevent duplicate visits
+    __table_args__ = (
+        UniqueConstraint('user_id', 'yard_sale_id', name='unique_user_yard_sale_visit'),
+    )
 
 # Dependency to get database session
 def get_db():

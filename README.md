@@ -79,6 +79,14 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - `GET /verifications` - Get user's verification status
 - `GET /users/{user_id}/verifications` - Get all verifications for a specific user
 
+#### Visit Tracking System
+
+- `POST /yard-sales/{id}/visit` - Mark a yard sale as visited
+- `DELETE /yard-sales/{id}/visit` - Mark a yard sale as not visited
+- `GET /user/visited-yard-sales` - Get user's visited yard sales
+- `GET /yard-sales?include_visited_status=true` - Get yard sales with visited status
+- `GET /yard-sales/{id}/visit-stats` - Get visit statistics for a yard sale
+
 ### Item Management (🔒 Protected Routes)
 
 - `GET /items` - Get all items for current user
@@ -480,6 +488,47 @@ curl -X GET "http://localhost:8000/verifications" \
 curl -X GET "http://localhost:8000/users/15/verifications"
 ```
 
+## Visit Tracking System Examples
+
+### 31. Mark Yard Sale as Visited
+
+```bash
+# Mark a yard sale as visited (increments visit count if already visited)
+curl -X POST "http://localhost:8000/yard-sales/1/visit" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 32. Get User's Visited Yard Sales
+
+```bash
+# Get all yard sales visited by the current user
+curl -X GET "http://localhost:8000/user/visited-yard-sales" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 33. Get Yard Sales with Visited Status
+
+```bash
+# Get yard sales with visited status included
+curl -X GET "http://localhost:8000/yard-sales?include_visited_status=true&limit=10" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 34. Get Visit Statistics
+
+```bash
+# Get visit statistics for a specific yard sale
+curl -X GET "http://localhost:8000/yard-sales/1/visit-stats"
+```
+
+### 35. Remove Visit Record
+
+```bash
+# Mark a yard sale as not visited (remove visit record)
+curl -X DELETE "http://localhost:8000/yard-sales/1/visit" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ## Data Models
 
 ### User
@@ -538,6 +587,9 @@ curl -X GET "http://localhost:8000/users/15/verifications"
 - `owner_id`: ID of the user who created this yard sale
 - `owner_username`: Username of the yard sale owner
 - `comment_count`: Number of comments on this yard sale
+- `is_visited`: Whether current user has visited this yard sale (only when include_visited_status=true)
+- `visit_count`: Number of times current user visited this yard sale (only when include_visited_status=true)
+- `last_visited`: Timestamp of current user's last visit (only when include_visited_status=true)
 
 ### Comment
 
@@ -616,6 +668,25 @@ curl -X GET "http://localhost:8000/users/15/verifications"
 - `created_at`: Request creation timestamp (auto-generated)
 - `user_id`: ID of the user requesting verification
 - `user_username`: Username of the user requesting verification
+
+### Visited Yard Sale
+
+- `id`: Unique identifier (auto-generated)
+- `yard_sale_id`: ID of the visited yard sale
+- `yard_sale_title`: Title of the visited yard sale
+- `visited_at`: Timestamp of first visit
+- `visit_count`: Number of times user visited this yard sale
+- `last_visited`: Timestamp of most recent visit
+- `created_at`: Record creation timestamp
+
+### Visit Statistics
+
+- `yard_sale_id`: ID of the yard sale
+- `yard_sale_title`: Title of the yard sale
+- `total_visits`: Total number of visits across all users
+- `unique_visitors`: Number of unique users who visited
+- `most_recent_visit`: Timestamp of most recent visit by any user
+- `average_visits_per_user`: Average visits per user who visited
 
 ## Error Handling
 

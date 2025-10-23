@@ -10,7 +10,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
-from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification
+from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -261,6 +261,9 @@ class YardSaleResponse(BaseModel):
     owner_id: int
     owner_username: str
     comment_count: int = 0
+    is_visited: Optional[bool] = None
+    visit_count: Optional[int] = None
+    last_visited: Optional[datetime] = None
 
 # Comment Models
 class CommentCreate(BaseModel):
@@ -377,6 +380,24 @@ class VerificationResponse(BaseModel):
     created_at: datetime
     user_id: int
     user_username: str
+
+# Visit Tracking Models
+class VisitedYardSaleResponse(BaseModel):
+    id: int
+    yard_sale_id: int
+    yard_sale_title: str
+    visited_at: datetime
+    visit_count: int
+    last_visited: datetime
+    created_at: datetime
+
+class VisitStatsResponse(BaseModel):
+    yard_sale_id: int
+    yard_sale_title: str
+    total_visits: int
+    unique_visitors: int
+    most_recent_visit: Optional[datetime]
+    average_visits_per_user: float
 
 # Token blacklist for logout functionality
 token_blacklist = set()
@@ -876,6 +897,8 @@ async def get_yard_sales(
     category: Optional[str] = None,
     price_range: Optional[str] = None,
     status: Optional[YardSaleStatus] = None,
+    include_visited_status: bool = False,
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Get all active yard sales with optional filtering"""
@@ -900,14 +923,36 @@ async def get_yard_sales(
     
     yard_sales = query.offset(skip).limit(limit).all()
     
-    # Build response with comment counts
+    # Build response with comment counts and visited status
     result = []
     for yard_sale in yard_sales:
         comment_count = db.query(Comment).filter(Comment.yard_sale_id == yard_sale.id).count()
+        
+        # Get visited status if requested and user is authenticated
+        is_visited = None
+        visit_count = None
+        last_visited = None
+        
+        if include_visited_status and current_user:
+            visit = db.query(VisitedYardSale).filter(
+                VisitedYardSale.user_id == current_user.id,
+                VisitedYardSale.yard_sale_id == yard_sale.id
+            ).first()
+            
+            if visit:
+                is_visited = True
+                visit_count = visit.visit_count
+                last_visited = visit.last_visited
+            else:
+                is_visited = False
+        
         result.append(YardSaleResponse(
             **yard_sale.__dict__,
             owner_username=yard_sale.owner.username,
-            comment_count=comment_count
+            comment_count=comment_count,
+            is_visited=is_visited,
+            visit_count=visit_count,
+            last_visited=last_visited
         ))
     
     return result
@@ -1800,6 +1845,158 @@ async def create_rating(
         rated_user_username=rated_user.username,
         yard_sale_id=rating.yard_sale_id,
         yard_sale_title=yard_sale.title if yard_sale else None
+    )
+
+# Visit Tracking Endpoints
+@app.post("/yard-sales/{yard_sale_id}/visit", response_model=VisitedYardSaleResponse)
+async def mark_yard_sale_visited(
+    yard_sale_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark a yard sale as visited by the current user"""
+    # Check if yard sale exists
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    if not yard_sale:
+        raise HTTPException(status_code=404, detail="Yard sale not found")
+    
+    # Check if user has already visited this yard sale
+    existing_visit = db.query(VisitedYardSale).filter(
+        VisitedYardSale.user_id == current_user.id,
+        VisitedYardSale.yard_sale_id == yard_sale_id
+    ).first()
+    
+    if existing_visit:
+        # Update existing visit - increment count and update last_visited
+        existing_visit.visit_count += 1
+        existing_visit.last_visited = get_mountain_time()
+        existing_visit.updated_at = get_mountain_time()
+        db.commit()
+        db.refresh(existing_visit)
+        
+        return VisitedYardSaleResponse(
+            id=existing_visit.id,
+            yard_sale_id=existing_visit.yard_sale_id,
+            yard_sale_title=yard_sale.title,
+            visited_at=existing_visit.visited_at,
+            visit_count=existing_visit.visit_count,
+            last_visited=existing_visit.last_visited,
+            created_at=existing_visit.created_at
+        )
+    else:
+        # Create new visit record
+        visit = VisitedYardSale(
+            user_id=current_user.id,
+            yard_sale_id=yard_sale_id,
+            visited_at=get_mountain_time(),
+            visit_count=1,
+            last_visited=get_mountain_time()
+        )
+        
+        db.add(visit)
+        db.commit()
+        db.refresh(visit)
+        
+        return VisitedYardSaleResponse(
+            id=visit.id,
+            yard_sale_id=visit.yard_sale_id,
+            yard_sale_title=yard_sale.title,
+            visited_at=visit.visited_at,
+            visit_count=visit.visit_count,
+            last_visited=visit.last_visited,
+            created_at=visit.created_at
+        )
+
+@app.delete("/yard-sales/{yard_sale_id}/visit")
+async def mark_yard_sale_not_visited(
+    yard_sale_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark a yard sale as not visited by the current user (remove visit record)"""
+    # Check if yard sale exists
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    if not yard_sale:
+        raise HTTPException(status_code=404, detail="Yard sale not found")
+    
+    # Find and delete the visit record
+    visit = db.query(VisitedYardSale).filter(
+        VisitedYardSale.user_id == current_user.id,
+        VisitedYardSale.yard_sale_id == yard_sale_id
+    ).first()
+    
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit record not found")
+    
+    db.delete(visit)
+    db.commit()
+    
+    return {"message": "Yard sale marked as not visited"}
+
+@app.get("/user/visited-yard-sales", response_model=List[VisitedYardSaleResponse])
+async def get_user_visited_yard_sales(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all yard sales visited by the current user"""
+    visits = db.query(VisitedYardSale).filter(
+        VisitedYardSale.user_id == current_user.id
+    ).order_by(VisitedYardSale.last_visited.desc()).all()
+    
+    result = []
+    for visit in visits:
+        yard_sale = db.query(YardSale).filter(YardSale.id == visit.yard_sale_id).first()
+        if yard_sale:  # Only include visits for yard sales that still exist
+            result.append(VisitedYardSaleResponse(
+                id=visit.id,
+                yard_sale_id=visit.yard_sale_id,
+                yard_sale_title=yard_sale.title,
+                visited_at=visit.visited_at,
+                visit_count=visit.visit_count,
+                last_visited=visit.last_visited,
+                created_at=visit.created_at
+            ))
+    
+    return result
+
+@app.get("/yard-sales/{yard_sale_id}/visit-stats", response_model=VisitStatsResponse)
+async def get_yard_sale_visit_stats(
+    yard_sale_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get visit statistics for a specific yard sale"""
+    # Check if yard sale exists
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    if not yard_sale:
+        raise HTTPException(status_code=404, detail="Yard sale not found")
+    
+    # Get all visits for this yard sale
+    visits = db.query(VisitedYardSale).filter(
+        VisitedYardSale.yard_sale_id == yard_sale_id
+    ).all()
+    
+    if not visits:
+        return VisitStatsResponse(
+            yard_sale_id=yard_sale_id,
+            yard_sale_title=yard_sale.title,
+            total_visits=0,
+            unique_visitors=0,
+            most_recent_visit=None,
+            average_visits_per_user=0.0
+        )
+    
+    total_visits = sum(visit.visit_count for visit in visits)
+    unique_visitors = len(visits)
+    most_recent_visit = max(visit.last_visited for visit in visits)
+    average_visits_per_user = total_visits / unique_visitors if unique_visitors > 0 else 0.0
+    
+    return VisitStatsResponse(
+        yard_sale_id=yard_sale_id,
+        yard_sale_title=yard_sale.title,
+        total_visits=total_visits,
+        unique_visitors=unique_visitors,
+        most_recent_visit=most_recent_visit,
+        average_visits_per_user=average_visits_per_user
     )
 
 # Custom exception handler
