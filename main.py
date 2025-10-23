@@ -1732,6 +1732,17 @@ async def create_user_rating(
     db.commit()
     db.refresh(rating)
     
+    # Create notification for the rated user
+    create_notification(
+        db=db,
+        user_id=user_id,
+        notification_type="rating",
+        title=f"New rating from {current_user.username}",
+        message=f"You received a {rating.rating}-star rating: \"{rating.review_text[:100] if rating.review_text else 'No review text'}{'...' if rating.review_text and len(rating.review_text) > 100 else ''}\"",
+        related_user_id=current_user.id,
+        related_yard_sale_id=rating.yard_sale_id
+    )
+    
     return UserRatingResponse(
         id=rating.id,
         rating=rating.rating,
@@ -2154,6 +2165,18 @@ async def mark_yard_sale_visited(
         db.add(visit)
         db.commit()
         db.refresh(visit)
+        
+        # Create notification for the yard sale owner (only for first visit, not repeat visits)
+        if yard_sale.owner_id != current_user.id:
+            create_notification(
+                db=db,
+                user_id=yard_sale.owner_id,
+                notification_type="visit",
+                title=f"Someone visited your yard sale!",
+                message=f"{current_user.username} visited your yard sale \"{yard_sale.title}\"",
+                related_user_id=current_user.id,
+                related_yard_sale_id=yard_sale_id
+            )
         
         return VisitedYardSaleResponse(
             id=visit.id,
