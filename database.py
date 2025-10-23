@@ -41,6 +41,7 @@ class User(Base):
     
     # Account status
     is_active = Column(Boolean, default=True)
+    permissions = Column(String(20), default="user", nullable=False)  # "user", "admin", "moderator"
     created_at = Column(DateTime, default=get_mountain_time)
     updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
     

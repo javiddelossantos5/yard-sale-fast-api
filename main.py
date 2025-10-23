@@ -17,6 +17,12 @@ from datetime import date, time
 from typing import List, Optional
 from enum import Enum
 
+# User Permission Levels
+class UserPermission(str, Enum):
+    USER = "user"
+    MODERATOR = "moderator"
+    ADMIN = "admin"
+
 # Authentication configuration
 SECRET_KEY = secrets.token_urlsafe(32)  # Generate a random secret key
 ALGORITHM = "HS256"
@@ -78,6 +84,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
 # Pydantic models for request/response validation
 class Location(BaseModel):
     city: Optional[str] = Field(None, max_length=100, description="City name")
@@ -111,6 +118,7 @@ class UserCreate(UserBase):
     full_name: Optional[str] = Field(None, max_length=100, description="Full name")
     location: Optional[Location] = None
     bio: Optional[str] = Field(None, max_length=1000, description="User bio")
+    permissions: UserPermission = Field(UserPermission.USER, description="User permission level")
 
 class UserResponse(UserBase):
     id: int
@@ -121,6 +129,7 @@ class UserResponse(UserBase):
     zip_code: Optional[str]
     bio: Optional[str]
     is_active: bool
+    permissions: UserPermission
     created_at: datetime
     updated_at: datetime
 
@@ -687,6 +696,24 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
+async def get_current_admin_user(current_user: User = Depends(get_current_active_user)):
+    """Get current user and verify they have admin permissions"""
+    if current_user.permissions != UserPermission.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return current_user
+
+async def get_current_moderator_or_admin_user(current_user: User = Depends(get_current_active_user)):
+    """Get current user and verify they have moderator or admin permissions"""
+    if current_user.permissions not in [UserPermission.MODERATOR.value, UserPermission.ADMIN.value]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Moderator or admin access required"
+        )
+    return current_user
+
 # Root endpoint
 @app.get("/", response_model=dict)
 async def root():
@@ -743,7 +770,8 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         state=state,
         zip_code=zip_code,
         bio=user.bio,
-        is_active=True
+        is_active=True,
+        permissions=user.permissions.value
     )
     
     db.add(db_user)
@@ -762,11 +790,12 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         zip_code=db_user.zip_code,
         bio=db_user.bio,
         is_active=db_user.is_active,
+        permissions=UserPermission(db_user.permissions),
         created_at=db_user.created_at,
         updated_at=db_user.updated_at
     )
 
-@app.post("/login", response_model=Token)
+@app.post("/api/login", response_model=Token)
 async def login_user(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """Login user and return access token"""
     user = authenticate_user(db, user_credentials.username, user_credentials.password)
@@ -795,7 +824,7 @@ async def logout_user(current_user: User = Depends(get_current_active_user)):
     # For this example, we'll return a success message
     return {"message": "Successfully logged out"}
 
-@app.get("/me", response_model=UserResponse)
+@app.get("/api/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Get current user information"""
     return UserResponse(
@@ -809,6 +838,7 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
         zip_code=current_user.zip_code,
         bio=current_user.bio,
         is_active=current_user.is_active,
+        permissions=UserPermission(current_user.permissions),
         created_at=current_user.created_at,
         updated_at=current_user.updated_at
     )
@@ -2036,7 +2066,7 @@ async def create_user_rating(
         yard_sale_title=yard_sale.title if yard_sale else None
     )
 
-@app.get("/users/{user_id}/ratings", response_model=List[UserRatingResponse])
+@app.get("/api/users/{user_id}/ratings", response_model=List[UserRatingResponse])
 async def get_user_ratings(
     user_id: int,
     db: Session = Depends(get_db)
@@ -2255,7 +2285,7 @@ async def get_user_verifications(
     return result
 
 # Additional User Profile Endpoints
-@app.get("/users/{user_id}", response_model=UserProfileResponse)
+@app.get("/api/users/{user_id}", response_model=UserProfileResponse)
 async def get_user_by_id(
     user_id: int,
     db: Session = Depends(get_db)
@@ -2723,6 +2753,173 @@ async def delete_notification(
     
     return {"message": "Notification deleted"}
 
+# Admin-only endpoints
+@app.get("/admin/users", response_model=List[UserResponse])
+async def get_all_users(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get all users (admin only)"""
+    users = db.query(User).offset(skip).limit(limit).all()
+    return [
+        UserResponse(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            full_name=user.full_name,
+            phone_number=user.phone_number,
+            city=user.city,
+            state=user.state,
+            zip_code=user.zip_code,
+            bio=user.bio,
+            is_active=user.is_active,
+            permissions=UserPermission(user.permissions),
+            created_at=user.created_at,
+            updated_at=user.updated_at
+        )
+        for user in users
+    ]
+
+@app.get("/admin/users/{user_id}", response_model=UserResponse)
+async def get_user_by_id_admin(
+    user_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get user by ID (admin only)"""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        phone_number=user.phone_number,
+        city=user.city,
+        state=user.state,
+        zip_code=user.zip_code,
+        bio=user.bio,
+        is_active=user.is_active,
+        permissions=UserPermission(user.permissions),
+        created_at=user.created_at,
+        updated_at=user.updated_at
+    )
+
+class UserUpdateAdmin(BaseModel):
+    full_name: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None)
+    phone_number: Optional[str] = Field(None, max_length=20)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=2)
+    zip_code: Optional[str] = Field(None, max_length=10)
+    bio: Optional[str] = Field(None, max_length=1000)
+    is_active: Optional[bool] = None
+    permissions: Optional[UserPermission] = None
+
+@app.put("/admin/users/{user_id}", response_model=UserResponse)
+async def update_user_admin(
+    user_id: int,
+    user_update: UserUpdateAdmin,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Update user (admin only)"""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update fields if provided
+    if user_update.full_name is not None:
+        user.full_name = user_update.full_name
+    if user_update.email is not None:
+        user.email = user_update.email
+    if user_update.phone_number is not None:
+        user.phone_number = user_update.phone_number
+    if user_update.city is not None:
+        user.city = user_update.city
+    if user_update.state is not None:
+        user.state = user_update.state
+    if user_update.zip_code is not None:
+        user.zip_code = user_update.zip_code
+    if user_update.bio is not None:
+        user.bio = user_update.bio
+    if user_update.is_active is not None:
+        user.is_active = user_update.is_active
+    if user_update.permissions is not None:
+        user.permissions = user_update.permissions.value
+    
+    user.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(user)
+    
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        phone_number=user.phone_number,
+        city=user.city,
+        state=user.state,
+        zip_code=user.zip_code,
+        bio=user.bio,
+        is_active=user.is_active,
+        permissions=UserPermission(user.permissions),
+        created_at=user.created_at,
+        updated_at=user.updated_at
+    )
+
+@app.delete("/admin/users/{user_id}")
+async def delete_user_admin(
+    user_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Delete user (admin only)"""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent admin from deleting themselves
+    if user.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account"
+        )
+    
+    db.delete(user)
+    db.commit()
+    
+    return {"message": "User deleted successfully"}
+
+@app.get("/admin/reports", response_model=List[dict])
+async def get_all_reports(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: User = Depends(get_current_moderator_or_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get all reports (moderator/admin only)"""
+    reports = db.query(Report).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": report.id,
+            "report_type": report.report_type,
+            "description": report.description,
+            "status": report.status,
+            "created_at": report.created_at,
+            "updated_at": report.updated_at,
+            "reporter_id": report.reporter_id,
+            "reported_user_id": report.reported_user_id,
+            "reported_yard_sale_id": report.reported_yard_sale_id
+        }
+        for report in reports
+    ]
+
 # Custom exception handler
 @app.exception_handler(ValueError)
 async def value_error_handler(request, exc):
@@ -2730,6 +2927,7 @@ async def value_error_handler(request, exc):
         status_code=status.HTTP_400_BAD_REQUEST,
         content={"detail": str(exc)}
     )
+
 
 if __name__ == "__main__":
     uvicorn.run(
