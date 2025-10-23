@@ -62,6 +62,9 @@ class User(Base):
     
     # Visit tracking relationships
     visited_yard_sales = relationship("VisitedYardSale", back_populates="user")
+    
+    # Notification relationships
+    notifications = relationship("Notification", foreign_keys="Notification.user_id", back_populates="user")
 
 class Item(Base):
     __tablename__ = "items"
@@ -258,6 +261,29 @@ class VisitedYardSale(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'yard_sale_id', name='unique_user_yard_sale_visit'),
     )
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String(50), nullable=False)  # "message", "rating", "comment", "visit", etc.
+    title = Column(String(200), nullable=False)
+    message = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=get_mountain_time)
+    read_at = Column(DateTime, nullable=True)
+    
+    # Foreign Keys
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User receiving the notification
+    related_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User who triggered the notification
+    related_yard_sale_id = Column(Integer, ForeignKey("yard_sales.id"), nullable=True)  # Related yard sale
+    related_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)  # Related message
+    
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id], back_populates="notifications")
+    related_user = relationship("User", foreign_keys=[related_user_id])
+    related_yard_sale = relationship("YardSale", foreign_keys=[related_yard_sale_id])
+    related_message = relationship("Message", foreign_keys=[related_message_id])
 
 # Dependency to get database session
 def get_db():

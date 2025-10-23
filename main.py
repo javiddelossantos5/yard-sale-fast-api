@@ -10,7 +10,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
-from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale
+from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -401,6 +401,26 @@ class VisitStatsResponse(BaseModel):
     most_recent_visit: Optional[datetime]
     average_visits_per_user: float
 
+# Notification Models
+class NotificationResponse(BaseModel):
+    id: int
+    type: str
+    title: str
+    message: str
+    is_read: bool
+    created_at: datetime
+    read_at: Optional[datetime]
+    user_id: int
+    related_user_id: Optional[int]
+    related_user_username: Optional[str]
+    related_yard_sale_id: Optional[int]
+    related_yard_sale_title: Optional[str]
+    related_message_id: Optional[int]
+
+class NotificationCountResponse(BaseModel):
+    total_notifications: int
+    unread_notifications: int
+
 # Token blacklist for logout functionality
 token_blacklist = set()
 
@@ -436,6 +456,33 @@ def get_or_create_conversation(db: Session, yard_sale_id: int, user1_id: int, us
         db.commit()
     
     return conversation
+
+# Notification helper functions
+def create_notification(
+    db: Session,
+    user_id: int,
+    notification_type: str,
+    title: str,
+    message: str,
+    related_user_id: Optional[int] = None,
+    related_yard_sale_id: Optional[int] = None,
+    related_message_id: Optional[int] = None
+):
+    """Create a notification for a user"""
+    notification = Notification(
+        user_id=user_id,
+        type=notification_type,
+        title=title,
+        message=message,
+        related_user_id=related_user_id,
+        related_yard_sale_id=related_yard_sale_id,
+        related_message_id=related_message_id
+    )
+    
+    db.add(notification)
+    db.commit()
+    db.refresh(notification)
+    return notification
 
 # Authentication utility functions
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -1187,6 +1234,19 @@ async def send_message(
     db.commit()
     db.refresh(message)
     
+    # Create notification for the recipient (only if not sending to self)
+    if recipient_id != current_user.id:
+        create_notification(
+            db=db,
+            user_id=recipient_id,
+            notification_type="message",
+            title=f"New message from {current_user.username}",
+            message=f"You received a message: \"{message_data.content[:100]}{'...' if len(message_data.content) > 100 else ''}\"",
+            related_user_id=current_user.id,
+            related_yard_sale_id=yard_sale_id,
+            related_message_id=message.id
+        )
+    
     return MessageResponse(
         id=message.id,
         content=message.content,
@@ -1381,6 +1441,19 @@ async def send_conversation_message(
     # Get recipient info for response
     recipient = db.query(User).filter(User.id == recipient_id).first()
     
+    # Create notification for the recipient (only if not sending to self)
+    if recipient_id != current_user.id:
+        create_notification(
+            db=db,
+            user_id=recipient_id,
+            notification_type="message",
+            title=f"New message from {current_user.username}",
+            message=f"You received a message: \"{message_data.content[:100]}{'...' if len(message_data.content) > 100 else ''}\"",
+            related_user_id=current_user.id,
+            related_yard_sale_id=conversation.yard_sale_id,
+            related_message_id=message.id
+        )
+    
     return MessageResponse(
         id=message.id,
         content=message.content,
@@ -1528,6 +1601,19 @@ async def send_message_general(
         # Get recipient info
         recipient = db.query(User).filter(User.id == recipient_id).first()
         
+        # Create notification for the recipient (only if not sending to self)
+        if recipient_id != current_user.id:
+            create_notification(
+                db=db,
+                user_id=recipient_id,
+                notification_type="message",
+                title=f"New message from {current_user.username}",
+                message=f"You received a message: \"{message_data.content[:100]}{'...' if len(message_data.content) > 100 else ''}\"",
+                related_user_id=current_user.id,
+                related_yard_sale_id=message_data.yard_sale_id,
+                related_message_id=message.id
+            )
+        
         return MessageResponse(
             id=message.id,
             content=message.content,
@@ -1569,6 +1655,19 @@ async def send_message_general(
         
         # Get recipient info
         recipient = db.query(User).filter(User.id == recipient_id).first()
+        
+        # Create notification for the recipient (only if not sending to self)
+        if recipient_id != current_user.id:
+            create_notification(
+                db=db,
+                user_id=recipient_id,
+                notification_type="message",
+                title=f"New message from {current_user.username}",
+                message=f"You received a message: \"{message_data.content[:100]}{'...' if len(message_data.content) > 100 else ''}\"",
+                related_user_id=current_user.id,
+                related_yard_sale_id=conversation.yard_sale_id,
+                related_message_id=message.id
+            )
         
         return MessageResponse(
             id=message.id,
@@ -2157,6 +2256,132 @@ async def get_yard_sale_visit_stats(
         most_recent_visit=most_recent_visit,
         average_visits_per_user=average_visits_per_user
     )
+
+# Notification Endpoints
+@app.get("/notifications", response_model=List[NotificationResponse])
+async def get_user_notifications(
+    skip: int = 0,
+    limit: int = 50,
+    unread_only: bool = False,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get notifications for the current user"""
+    query = db.query(Notification).filter(Notification.user_id == current_user.id)
+    
+    if unread_only:
+        query = query.filter(Notification.is_read == False)
+    
+    notifications = query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
+    
+    result = []
+    for notification in notifications:
+        # Get related user info
+        related_user_username = None
+        if notification.related_user_id:
+            related_user = db.query(User).filter(User.id == notification.related_user_id).first()
+            if related_user:
+                related_user_username = related_user.username
+        
+        # Get related yard sale info
+        related_yard_sale_title = None
+        if notification.related_yard_sale_id:
+            related_yard_sale = db.query(YardSale).filter(YardSale.id == notification.related_yard_sale_id).first()
+            if related_yard_sale:
+                related_yard_sale_title = related_yard_sale.title
+        
+        result.append(NotificationResponse(
+            id=notification.id,
+            type=notification.type,
+            title=notification.title,
+            message=notification.message,
+            is_read=notification.is_read,
+            created_at=notification.created_at,
+            read_at=notification.read_at,
+            user_id=notification.user_id,
+            related_user_id=notification.related_user_id,
+            related_user_username=related_user_username,
+            related_yard_sale_id=notification.related_yard_sale_id,
+            related_yard_sale_title=related_yard_sale_title,
+            related_message_id=notification.related_message_id
+        ))
+    
+    return result
+
+@app.get("/notifications/count", response_model=NotificationCountResponse)
+async def get_notification_count(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get notification count for the current user"""
+    total_notifications = db.query(Notification).filter(Notification.user_id == current_user.id).count()
+    unread_notifications = db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.is_read == False
+    ).count()
+    
+    return NotificationCountResponse(
+        total_notifications=total_notifications,
+        unread_notifications=unread_notifications
+    )
+
+@app.put("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark a notification as read"""
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id,
+        Notification.user_id == current_user.id
+    ).first()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    notification.is_read = True
+    notification.read_at = get_mountain_time()
+    db.commit()
+    
+    return {"message": "Notification marked as read"}
+
+@app.put("/notifications/read-all")
+async def mark_all_notifications_read(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark all notifications as read for the current user"""
+    db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.is_read == False
+    ).update({
+        "is_read": True,
+        "read_at": get_mountain_time()
+    })
+    db.commit()
+    
+    return {"message": "All notifications marked as read"}
+
+@app.delete("/notifications/{notification_id}")
+async def delete_notification(
+    notification_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a notification"""
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id,
+        Notification.user_id == current_user.id
+    ).first()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    db.delete(notification)
+    db.commit()
+    
+    return {"message": "Notification deleted"}
 
 # Custom exception handler
 @app.exception_handler(ValueError)

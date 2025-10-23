@@ -91,6 +91,14 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - `GET /yard-sales?include_visited_status=true` - Get yard sales with visited status
 - `GET /yard-sales/{id}/visit-stats` - Get visit statistics for a yard sale
 
+#### Notification System
+
+- `GET /notifications` - Get user's notifications
+- `GET /notifications/count` - Get notification count (total and unread)
+- `PUT /notifications/{id}/read` - Mark notification as read
+- `PUT /notifications/read-all` - Mark all notifications as read
+- `DELETE /notifications/{id}` - Delete notification
+
 ### Item Management (🔒 Protected Routes)
 
 - `GET /items` - Get all items for current user
@@ -579,6 +587,56 @@ curl -X DELETE "http://localhost:8000/yard-sales/1/visit" \
      -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
+## Notification System Examples
+
+### 36. Get User's Notifications
+
+```bash
+# Get all notifications for the current user
+curl -X GET "http://localhost:8000/notifications" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get only unread notifications
+curl -X GET "http://localhost:8000/notifications?unread_only=true" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get notifications with pagination
+curl -X GET "http://localhost:8000/notifications?skip=0&limit=10" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 37. Get Notification Count
+
+```bash
+# Get total and unread notification counts
+curl -X GET "http://localhost:8000/notifications/count" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 38. Mark Notification as Read
+
+```bash
+# Mark a specific notification as read
+curl -X PUT "http://localhost:8000/notifications/1/read" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 39. Mark All Notifications as Read
+
+```bash
+# Mark all notifications as read
+curl -X PUT "http://localhost:8000/notifications/read-all" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 40. Delete Notification
+
+```bash
+# Delete a specific notification
+curl -X DELETE "http://localhost:8000/notifications/1" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ## Data Models
 
 ### User
@@ -746,6 +804,27 @@ curl -X DELETE "http://localhost:8000/yard-sales/1/visit" \
 - `unique_visitors`: Number of unique users who visited
 - `most_recent_visit`: Timestamp of most recent visit by any user
 - `average_visits_per_user`: Average visits per user who visited
+
+### Notification
+
+- `id`: Unique identifier (auto-generated)
+- `type`: Notification type ("message", "rating", "comment", "visit", etc.)
+- `title`: Notification title (required, max 200 characters)
+- `message`: Notification message content (required)
+- `is_read`: Whether the notification has been read (default: false)
+- `created_at`: Creation timestamp (auto-generated)
+- `read_at`: Timestamp when notification was read (null if unread)
+- `user_id`: ID of the user receiving the notification
+- `related_user_id`: ID of the user who triggered the notification
+- `related_user_username`: Username of the user who triggered the notification
+- `related_yard_sale_id`: ID of the related yard sale (if applicable)
+- `related_yard_sale_title`: Title of the related yard sale (if applicable)
+- `related_message_id`: ID of the related message (if applicable)
+
+### Notification Count
+
+- `total_notifications`: Total number of notifications for the user
+- `unread_notifications`: Number of unread notifications for the user
 
 ## Error Handling
 
