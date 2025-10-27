@@ -1,5 +1,5 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict
@@ -12,6 +12,10 @@ from passlib.context import CryptContext
 import secrets
 from sqlalchemy.orm import Session
 import uuid
+import boto3
+from botocore.exceptions import ClientError
+import os
+from pathlib import Path
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
 from contextlib import asynccontextmanager
 from datetime import date, time
@@ -28,6 +32,22 @@ class UserPermission(str, Enum):
 SECRET_KEY = secrets.token_urlsafe(32)  # Generate a random secret key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 180  # 3 hours
+
+# Garage S3 Configuration
+GARAGE_ENDPOINT_URL = "http://10.1.2.165:3900"
+GARAGE_ACCESS_KEY_ID = "GKdfa877679e4f9f1c89612285"
+GARAGE_SECRET_ACCESS_KEY = "514fc1f21b01269ec46d9157a5e2eeabcb03a4b9733cfa1e5945dfc388f8a980"
+GARAGE_BUCKET_NAME = "nextcloud-bucket"
+GARAGE_REGION = "garage"  # Garage doesn't use regions, but boto3 requires it
+
+# Initialize S3 client for Garage
+s3_client = boto3.client(
+    's3',
+    endpoint_url=GARAGE_ENDPOINT_URL,
+    aws_access_key_id=GARAGE_ACCESS_KEY_ID,
+    aws_secret_access_key=GARAGE_SECRET_ACCESS_KEY,
+    region_name=GARAGE_REGION
+)
 
 # Helper functions
 def get_mountain_time() -> datetime:
@@ -395,6 +415,18 @@ class VerificationResponse(BaseModel):
     created_at: datetime
     user_id: str
     user_username: str
+
+# Image Upload Models
+class ImageUploadResponse(BaseModel):
+    success: bool
+    message: str
+    image_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+
+class ImageListResponse(BaseModel):
+    images: List[dict]
+    total: int
 
 # Visit Tracking Models
 class VisitedYardSaleResponse(BaseModel):
@@ -2995,6 +3027,198 @@ async def value_error_handler(request, exc):
         status_code=status.HTTP_400_BAD_REQUEST,
         content={"detail": str(exc)}
     )
+
+# Image Upload Endpoints
+@app.post("/upload/image", response_model=ImageUploadResponse)
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Upload an image to Garage S3 storage"""
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File must be an image"
+            )
+        
+        # Validate file size (max 10MB)
+        file_content = await file.read()
+        if len(file_content) > 10 * 1024 * 1024:  # 10MB
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size must be less than 10MB"
+            )
+        
+        # Generate unique filename
+        file_extension = Path(file.filename).suffix if file.filename else '.jpg'
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        s3_key = f"images/{current_user.id}/{unique_filename}"
+        
+        # Upload to Garage S3
+        s3_client.put_object(
+            Bucket=GARAGE_BUCKET_NAME,
+            Key=s3_key,
+            Body=file_content,
+            ContentType=file.content_type,
+            Metadata={
+                'uploaded_by': current_user.username,
+                'uploaded_at': datetime.now().isoformat(),
+                'original_filename': file.filename or 'unknown'
+            }
+        )
+        
+        # Generate proxy URL (served through FastAPI backend)
+        image_url = f"/image-proxy/{s3_key}"
+        
+        return ImageUploadResponse(
+            success=True,
+            message="Image uploaded successfully",
+            image_url=image_url,
+            file_name=unique_filename,
+            file_size=len(file_content)
+        )
+        
+    except ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload image: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+@app.get("/images", response_model=ImageListResponse)
+async def list_user_images(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """List all images uploaded by the current user"""
+    try:
+        # List objects in user's folder
+        prefix = f"images/{current_user.id}/"
+        response = s3_client.list_objects_v2(
+            Bucket=GARAGE_BUCKET_NAME,
+            Prefix=prefix
+        )
+        
+        images = []
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                image_url = f"/image-proxy/{obj['Key']}"
+                images.append({
+                    'key': obj['Key'],
+                    'url': image_url,
+                    'size': obj['Size'],
+                    'last_modified': obj['LastModified'].isoformat(),
+                    'filename': obj['Key'].split('/')[-1]
+                })
+        
+        return ImageListResponse(
+            images=images,
+            total=len(images)
+        )
+        
+    except ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list images: {str(e)}"
+        )
+
+@app.delete("/images/{image_key:path}")
+async def delete_image(
+    image_key: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete an image uploaded by the current user"""
+    try:
+        # Verify the image belongs to the current user
+        if not image_key.startswith(f"images/{current_user.id}/"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only delete your own images"
+            )
+        
+        # Check if object exists
+        try:
+            s3_client.head_object(Bucket=GARAGE_BUCKET_NAME, Key=image_key)
+        except ClientError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Image not found"
+            )
+        
+        # Delete the object
+        s3_client.delete_object(Bucket=GARAGE_BUCKET_NAME, Key=image_key)
+        
+        return {"message": "Image deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete image: {str(e)}"
+        )
+
+@app.get("/image-proxy/{image_key:path}")
+async def proxy_image(
+    image_key: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Proxy images from Garage S3 with authentication"""
+    try:
+        # Verify the image belongs to the current user
+        if not image_key.startswith(f"images/{current_user.id}/"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only access your own images"
+            )
+        
+        # Get the image from Garage S3
+        response = s3_client.get_object(Bucket=GARAGE_BUCKET_NAME, Key=image_key)
+        
+        # Get content type from S3 response
+        content_type = response.get('ContentType', 'image/jpeg')
+        
+        # Create streaming response
+        def generate():
+            for chunk in response['Body'].iter_chunks(chunk_size=8192):
+                yield chunk
+        
+        return StreamingResponse(
+            generate(),
+            media_type=content_type,
+            headers={
+                'Cache-Control': 'public, max-age=3600',  # Cache for 1 hour
+                'Content-Disposition': f'inline; filename="{image_key.split("/")[-1]}"'
+            }
+        )
+        
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Image not found"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to retrieve image: {str(e)}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
