@@ -547,8 +547,8 @@ def create_notification(
     title: str,
     message: str,
     related_user_id: Optional[str] = None,
-    related_yard_sale_id: Optional[int] = None,
-    related_message_id: Optional[int] = None
+    related_yard_sale_id: Optional[str] = None,
+    related_message_id: Optional[str] = None
 ):
     """Create a notification for a user"""
     notification = Notification(
@@ -2101,6 +2101,68 @@ async def get_user_ratings(
     
     return result
 
+@app.get("/users/{user_id}/ratings", response_model=List[UserRatingResponse])
+async def get_user_ratings_by_id(
+    user_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all ratings for a user by ID (authenticated endpoint)"""
+    # Check if user exists
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    ratings = db.query(UserRating).filter(UserRating.rated_user_id == user_id).all()
+    
+    result = []
+    for rating in ratings:
+        yard_sale = None
+        if rating.yard_sale_id:
+            yard_sale = db.query(YardSale).filter(YardSale.id == rating.yard_sale_id).first()
+        
+        result.append(UserRatingResponse(
+            id=rating.id,
+            rating=rating.rating,
+            review_text=rating.review_text,
+            created_at=rating.created_at,
+            reviewer_id=rating.reviewer_id,
+            reviewer_username=rating.reviewer.username,
+            rated_user_id=rating.rated_user_id,
+            rated_user_username=rating.rated_user.username,
+            yard_sale_id=rating.yard_sale_id,
+            yard_sale_title=yard_sale.title if yard_sale else None
+        ))
+    
+    return result
+
+@app.get("/users/{user_id}", response_model=UserResponse)
+async def get_user_by_id(
+    user_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get user by ID (basic user information)"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        phone_number=user.phone_number,
+        city=user.city,
+        state=user.state,
+        zip_code=user.zip_code,
+        bio=user.bio,
+        is_active=user.is_active,
+        permissions=UserPermission(user.permissions),
+        created_at=user.created_at,
+        updated_at=user.updated_at
+    )
+
 @app.get("/users/{user_id}/profile", response_model=UserProfileResponse)
 async def get_user_profile(
     user_id: str,
@@ -2479,15 +2541,20 @@ async def mark_yard_sale_visited(
         
         # Create notification for the yard sale owner (only for first visit, not repeat visits)
         if yard_sale.owner_id != current_user.id:
-            create_notification(
-                db=db,
-                user_id=yard_sale.owner_id,
-                notification_type="visit",
-                title=f"Someone visited your yard sale!",
-                message=f"{current_user.username} visited your yard sale \"{yard_sale.title}\"",
-                related_user_id=current_user.id,
-                related_yard_sale_id=yard_sale_id
-            )
+            try:
+                create_notification(
+                    db=db,
+                    user_id=yard_sale.owner_id,
+                    notification_type="visit",
+                    title=f"Someone visited your yard sale!",
+                    message=f"{current_user.username} visited your yard sale \"{yard_sale.title}\"",
+                    related_user_id=current_user.id,
+                    related_yard_sale_id=yard_sale_id
+                )
+            except Exception as e:
+                # If notification creation fails, continue without error
+                print(f"Notification creation failed: {e}")
+                pass
         
         return VisitedYardSaleResponse(
             id=visit.id,
