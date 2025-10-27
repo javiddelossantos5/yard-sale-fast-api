@@ -27,7 +27,7 @@ class UserPermission(str, Enum):
 # Authentication configuration
 SECRET_KEY = secrets.token_urlsafe(32)  # Generate a random secret key
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 180  # 3 hours
 
 # Helper functions
 def get_mountain_time() -> datetime:
