@@ -82,7 +82,7 @@
         <h2>🎉 Expected Results</h2>
         <p>After running the script, you should see:</p>
         <ul>
-          <li class="success">✅ Svelte Frontend: http://10.1.2.165/</li>
+          <li class="success">✅ Svelte Frontend: http://10.1.2.165:3000/</li>
           <li class="success">✅ FastAPI Backend: http://10.1.2.165:8000/</li>
           <li class="success">✅ API Docs: http://10.1.2.165:8000/docs</li>
         </ul>
@@ -99,12 +99,12 @@
       </div>
 
       <div class="step">
-        <h2>🌐 Domain Configuration</h2>
-        <p>Once everything is working on IP, configure your domain:</p>
+        <h2>🌐 External Nginx Configuration</h2>
+        <p>For your external Nginx setup, forward these ports:</p>
         <ul>
-          <li><strong>Domain:</strong> garage.javidscript.com</li>
-          <li><strong>Forward to:</strong> 10.1.2.165:80</li>
-          <li><strong>SSL:</strong> Enable in Nginx Proxy Manager</li>
+          <li><strong>Frontend:</strong> Forward to 10.1.2.165:3000</li>
+          <li><strong>Backend API:</strong> Forward to 10.1.2.165:8000</li>
+          <li><strong>SSL:</strong> Configure in your external Nginx</li>
         </ul>
       </div>
 
@@ -114,7 +114,9 @@
         <ul>
           <li>
             🎨 Frontend:
-            <a href="http://10.1.2.165/" target="_blank">http://10.1.2.165/</a>
+            <a href="http://10.1.2.165:3000/" target="_blank"
+              >http://10.1.2.165:3000/</a
+            >
           </li>
           <li>
             🔧 API:

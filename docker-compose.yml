@@ -13,28 +13,11 @@ services:
       - GARAGE_ACCESS_KEY_ID=GKdfa877679e4f9f1c89612285
       - GARAGE_SECRET_ACCESS_KEY=514fc1f21b01269ec46d9157a5e2eeabcb03a4b9733cfa1e5945dfc388f8a980
       - GARAGE_BUCKET_NAME=nextcloud-bucket
-      - DOMAIN_NAME=https://garage.javidscript.com
+      - DOMAIN_NAME=http://10.1.2.165:8000
     depends_on:
       - db
     volumes:
       - ./static:/app/static
-    restart: unless-stopped
-    networks:
-      - app-network
-
-  # Frontend (Nginx)
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: nginx-frontend
-    ports:
-      - 80:80
-      - 443:443
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - backend
     restart: unless-stopped
     networks:
       - app-network
