@@ -3219,12 +3219,13 @@ async def proxy_image(
         if user is None or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
-        # Verify the image belongs to the current user
-        if not image_key.startswith(f"images/{user.id}/"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only access your own images"
-            )
+        # For yard sale app, allow users to view any image (not just their own)
+        # Remove the ownership check to allow public viewing of images
+        # if not image_key.startswith(f"images/{user.id}/"):
+        #     raise HTTPException(
+        #         status_code=status.HTTP_403_FORBIDDEN,
+        #         detail="You can only access your own images"
+        #     )
 
         # Fetch from Garage S3
         response = s3_client.get_object(Bucket=MINIO_BUCKET_NAME, Key=image_key)
