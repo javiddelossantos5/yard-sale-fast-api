@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File, Header, Cookie, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -34,23 +34,23 @@ SECRET_KEY = secrets.token_urlsafe(32)  # Generate a random secret key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 180  # 3 hours
 
-# Garage S3 Configuration
-GARAGE_ENDPOINT_URL = "http://10.1.2.165:3900"
-GARAGE_ACCESS_KEY_ID = "GKdfa877679e4f9f1c89612285"
-GARAGE_SECRET_ACCESS_KEY = "514fc1f21b01269ec46d9157a5e2eeabcb03a4b9733cfa1e5945dfc388f8a980"
-GARAGE_BUCKET_NAME = "nextcloud-bucket"
-GARAGE_REGION = "garage"  # Garage doesn't use regions, but boto3 requires it
+# MinIO S3 Configuration
+MINIO_ENDPOINT_URL = "http://10.1.2.165:9000"
+MINIO_ACCESS_KEY_ID = "minioadmin"
+MINIO_SECRET_ACCESS_KEY = "minioadmin"
+MINIO_BUCKET_NAME = "yardsale"
+MINIO_REGION = "us-east-1"  # MinIO ignores this, but boto3 requires it
 
 # Domain configuration for image URLs
-DOMAIN_NAME = "https://garage.javidscript.com"  # Your domain with SSL
+DOMAIN_NAME = "http://localhost:8000"  # For local development
 
-# Initialize S3 client for Garage
+# Initialize S3 client for MinIO
 s3_client = boto3.client(
     's3',
-    endpoint_url=GARAGE_ENDPOINT_URL,
-    aws_access_key_id=GARAGE_ACCESS_KEY_ID,
-    aws_secret_access_key=GARAGE_SECRET_ACCESS_KEY,
-    region_name=GARAGE_REGION
+    endpoint_url=MINIO_ENDPOINT_URL,
+    aws_access_key_id=MINIO_ACCESS_KEY_ID,
+    aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
+    region_name=MINIO_REGION
 )
 
 # Helper functions
@@ -3073,7 +3073,7 @@ async def upload_image(
         
         # Upload to Garage S3
         s3_client.put_object(
-            Bucket=GARAGE_BUCKET_NAME,
+            Bucket=MINIO_BUCKET_NAME,
             Key=s3_key,
             Body=file_content,
             ContentType=file.content_type,
@@ -3116,7 +3116,7 @@ async def list_user_images(
         # List objects in user's folder
         prefix = f"images/{current_user.id}/"
         response = s3_client.list_objects_v2(
-            Bucket=GARAGE_BUCKET_NAME,
+            Bucket=MINIO_BUCKET_NAME,
             Prefix=prefix
         )
         
@@ -3160,7 +3160,7 @@ async def delete_image(
         
         # Check if object exists
         try:
-            s3_client.head_object(Bucket=GARAGE_BUCKET_NAME, Key=image_key)
+            s3_client.head_object(Bucket=MINIO_BUCKET_NAME, Key=image_key)
         except ClientError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -3168,7 +3168,7 @@ async def delete_image(
             )
         
         # Delete the object
-        s3_client.delete_object(Bucket=GARAGE_BUCKET_NAME, Key=image_key)
+        s3_client.delete_object(Bucket=MINIO_BUCKET_NAME, Key=image_key)
         
         return {"message": "Image deleted successfully"}
         
@@ -3183,56 +3183,74 @@ async def delete_image(
 @app.get("/image-proxy/{image_key:path}")
 async def proxy_image(
     image_key: str,
-    current_user: User = Depends(get_current_active_user),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    token_query: str | None = Query(default=None, alias="token"),
+    access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db)
 ):
-    """Proxy images from Garage S3 with authentication"""
+    """Proxy images from Garage S3 with authentication.
+    Accepts JWT via Authorization header, `access_token` cookie, or `token` query param.
+    """
     try:
+        # Resolve token from header, cookie, or query param
+        resolved_token = None
+        if authorization and authorization.lower().startswith("bearer "):
+            resolved_token = authorization.split(" ", 1)[1].strip()
+        elif access_token_cookie:
+            resolved_token = access_token_cookie.strip()
+        elif token_query:
+            resolved_token = token_query.strip()
+
+        if not resolved_token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+        # Validate token and load user
+        try:
+            if resolved_token in token_blacklist:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+            payload = jwt.decode(resolved_token, SECRET_KEY, algorithms=[ALGORITHM])
+            username: str | None = payload.get("sub")
+            if not username:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+        except JWTError:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+        user = get_user_by_username(db, username)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
         # Verify the image belongs to the current user
-        if not image_key.startswith(f"images/{current_user.id}/"):
+        if not image_key.startswith(f"images/{user.id}/"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only access your own images"
             )
-        
-        # Get the image from Garage S3
-        response = s3_client.get_object(Bucket=GARAGE_BUCKET_NAME, Key=image_key)
-        
-        # Get content type from S3 response
+
+        # Fetch from Garage S3
+        response = s3_client.get_object(Bucket=MINIO_BUCKET_NAME, Key=image_key)
         content_type = response.get('ContentType', 'image/jpeg')
-        
-        # Create streaming response
+
         def generate():
             for chunk in response['Body'].iter_chunks(chunk_size=8192):
                 yield chunk
-        
+
         return StreamingResponse(
             generate(),
             media_type=content_type,
             headers={
-                'Cache-Control': 'public, max-age=3600',  # Cache for 1 hour
+                'Cache-Control': 'public, max-age=3600',
                 'Content-Disposition': f'inline; filename="{image_key.split("/")[-1]}"'
             }
         )
-        
+
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Image not found"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to retrieve image: {str(e)}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve image: {str(e)}")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error: {str(e)}")
 
 
 if __name__ == "__main__":
