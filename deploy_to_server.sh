@@ -47,84 +47,14 @@ run_remote "cd $REMOTE_PROJECT_PATH && python3 -m venv venv"
 echo "📦 Step 5: Installing Python dependencies on server..."
 run_remote "cd $REMOTE_PROJECT_PATH && source venv/bin/activate && pip install fastapi uvicorn sqlalchemy mysql-connector-python python-jose passlib bcrypt python-multipart boto3 pytz"
 
-echo "🌐 Step 6: Setting up Nginx configuration..."
-run_remote "sudo tee /etc/nginx/sites-available/fastapi-image-upload > /dev/null << 'EOF'
-server {
-    listen 80;
-    server_name $SERVER_IP;
+echo "🌐 Step 6: Skipping Nginx setup (using Nginx Proxy Manager)..."
+echo "✅ Nginx Proxy Manager is handling SSL and proxying to garage.javidscript.com"
+echo "✅ Your domain: https://garage.javidscript.com"
+echo "✅ Backend will run on port 8000 for Nginx Proxy Manager to proxy"
 
-    # Serve the HTML frontend
-    location / {
-        root $REMOTE_PROJECT_PATH;
-        index image_upload_frontend.html;
-        try_files \$uri \$uri/ =404;
-    }
-
-    # Proxy API requests to FastAPI
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Proxy upload and image endpoints
-    location /upload/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    location /images {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Proxy image proxy endpoint (serves images with authentication)
-    location /image-proxy/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Proxy other API endpoints
-    location /yard-sales {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    location /user {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    location /users {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF"
-
-echo "🔗 Step 7: Enabling Nginx site..."
-run_remote "sudo ln -sf /etc/nginx/sites-available/fastapi-image-upload /etc/nginx/sites-enabled/"
-run_remote "sudo nginx -t && sudo systemctl reload nginx"
+echo "🌐 Step 7: Adding frontend serving to FastAPI..."
+run_remote "cd $REMOTE_PROJECT_PATH && mkdir -p static"
+run_remote "cd $REMOTE_PROJECT_PATH && cp image_upload_frontend.html static/index.html"
 
 echo "🚀 Step 8: Creating systemd service for FastAPI..."
 run_remote "sudo tee /etc/systemd/system/fastapi-image-upload.service > /dev/null << 'EOF'
@@ -156,8 +86,14 @@ echo ""
 echo "🎉 Setup Complete!"
 echo "=================="
 echo "Your image upload system is now running on:"
-echo "  Frontend: http://$SERVER_IP/"
-echo "  API Docs: http://$SERVER_IP:8000/docs"
+echo "  🌐 Frontend: https://garage.javidscript.com/"
+echo "  📚 API Docs: https://garage.javidscript.com/docs"
+echo "  🔧 Backend: https://garage.javidscript.com/api/"
+echo ""
+echo "Nginx Proxy Manager Configuration:"
+echo "  📍 Domain: garage.javidscript.com"
+echo "  🔗 Forward to: 10.1.2.165:8000"
+echo "  🔒 SSL: Enabled (Let's Encrypt)"
 echo ""
 echo "To check logs:"
 echo "  sudo journalctl -u fastapi-image-upload -f"

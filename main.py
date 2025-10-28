@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict
@@ -39,6 +40,9 @@ GARAGE_ACCESS_KEY_ID = "GKdfa877679e4f9f1c89612285"
 GARAGE_SECRET_ACCESS_KEY = "514fc1f21b01269ec46d9157a5e2eeabcb03a4b9733cfa1e5945dfc388f8a980"
 GARAGE_BUCKET_NAME = "nextcloud-bucket"
 GARAGE_REGION = "garage"  # Garage doesn't use regions, but boto3 requires it
+
+# Domain configuration for image URLs
+DOMAIN_NAME = "https://garage.javidscript.com"  # Your domain with SSL
 
 # Initialize S3 client for Garage
 s3_client = boto3.client(
@@ -104,6 +108,16 @@ app = FastAPI(
     redoc_url="/redoc",  # ReDoc
     lifespan=lifespan
 )
+
+# Mount static files for frontend
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve frontend at root
+@app.get("/")
+async def serve_frontend():
+    """Serve the image upload frontend"""
+    from fastapi.responses import FileResponse
+    return FileResponse("static/index.html")
 
 
 # Pydantic models for request/response validation
@@ -3071,7 +3085,7 @@ async def upload_image(
         )
         
         # Generate proxy URL (served through FastAPI backend)
-        image_url = f"/image-proxy/{s3_key}"
+        image_url = f"{DOMAIN_NAME}/image-proxy/{s3_key}"
         
         return ImageUploadResponse(
             success=True,
@@ -3109,7 +3123,7 @@ async def list_user_images(
         images = []
         if 'Contents' in response:
             for obj in response['Contents']:
-                image_url = f"/image-proxy/{obj['Key']}"
+                image_url = f"{DOMAIN_NAME}/image-proxy/{obj['Key']}"
                 images.append({
                     'key': obj['Key'],
                     'url': image_url,
