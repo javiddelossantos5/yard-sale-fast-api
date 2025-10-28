@@ -6,7 +6,7 @@
 echo "📤 Copying Docker files to server..."
 
 # Copy all files
-scp -r /Users/javiddelossantos/Documents/Github/Strata/fast-api-test/* javiddelossantos@10.1.2.165:/home/javiddelossantos/fast-api-test/
+scp -r /Users/javiddelossantos/Documents/Github/Strata/yard-sale-svelte/* javiddelossantos@10.1.2.165:/home/javiddelossantos/yard-sale-svelte/
 
 echo "✅ Files copied successfully!"
 echo ""
