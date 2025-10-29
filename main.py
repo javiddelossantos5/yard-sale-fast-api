@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError
 import os
 from pathlib import Path
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
+from database import MarketItemComment, WatchedItem
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -202,6 +203,14 @@ class ItemResponse(BaseModel):
     description: Optional[str]
     price: float
     is_available: bool
+    # Marketplace fields
+    is_public: Optional[bool] = True
+    status: Optional[str] = "active"
+    category: Optional[str] = None
+    photos: Optional[List[str]] = None
+    featured_image: Optional[str] = None
+    price_range: Optional[str] = None
+    payment_methods: Optional[List[str]] = None
     created_at: datetime
     owner_id: str
 
@@ -210,6 +219,76 @@ class ItemUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     price: Optional[float] = Field(None, gt=0)
     is_available: Optional[bool] = None
+    # Allow updating marketplace fields on private items route too
+    is_public: Optional[bool] = None
+    status: Optional[str] = Field(None, pattern="^(active|sold|hidden)$")
+    category: Optional[str] = Field(None, max_length=100)
+    photos: Optional[List[str]] = None
+    featured_image: Optional[str] = Field(None, max_length=500)
+    price_range: Optional[str] = Field(None, max_length=50)
+    payment_methods: Optional[List[str]] = None
+
+# Market Item Models (public marketplace for individual items)
+class MarketItemCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    price: float = Field(..., gt=0)
+    is_public: bool = True
+    status: Optional[str] = Field("active", pattern="^(active|sold|hidden)$")
+    category: Optional[str] = Field(None, max_length=100)
+    photos: Optional[List[str]] = None
+    featured_image: Optional[str] = Field(None, max_length=500)
+    price_range: Optional[str] = Field(None, max_length=50)
+    payment_methods: Optional[List[str]] = None
+    venmo_url: Optional[str] = Field(None, max_length=500)
+    facebook_url: Optional[str] = Field(None, max_length=500)
+
+class MarketItemUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    price: Optional[float] = Field(None, gt=0)
+    is_public: Optional[bool] = None
+    status: Optional[str] = Field(None, pattern="^(active|sold|hidden)$")
+    category: Optional[str] = Field(None, max_length=100)
+    photos: Optional[List[str]] = None
+    featured_image: Optional[str] = Field(None, max_length=500)
+    price_range: Optional[str] = Field(None, max_length=50)
+    payment_methods: Optional[List[str]] = None
+    venmo_url: Optional[str] = Field(None, max_length=500)
+    facebook_url: Optional[str] = Field(None, max_length=500)
+
+class MarketItemResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str]
+    price: float
+    is_available: bool
+    is_public: bool
+    status: str
+    category: Optional[str]
+    photos: Optional[List[str]]
+    featured_image: Optional[str]
+    price_range: Optional[str]
+    payment_methods: Optional[List[str]]
+    venmo_url: Optional[str]
+    facebook_url: Optional[str]
+    comment_count: int = 0
+    created_at: datetime
+    owner_id: str
+    owner_username: str
+
+# Market item comments
+class MarketItemCommentCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000)
+
+class MarketItemCommentResponse(BaseModel):
+    id: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+    user_id: str
+    username: str
+    item_id: str
 
 # Yard Sale Models
 class YardSaleCreate(BaseModel):
@@ -956,126 +1035,214 @@ async def reset_password(
     
     return {"message": "Password reset successfully"}
 
-# GET all items (protected route)
-@app.get("/items", response_model=List[ItemResponse])
-async def get_items(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Get all items for the current user"""
-    user_items = db.query(Item).filter(Item.owner_id == current_user.id).all()
-    return user_items
-
-# GET item by ID (protected route)
-@app.get("/items/{item_id}", response_model=ItemResponse)
-async def get_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Get a specific item by ID (only if owned by current user)"""
-    item = db.query(Item).filter(
-        Item.id == item_id, 
-        Item.owner_id == current_user.id
-    ).first()
-    
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Item with id {item_id} not found"
-        )
-    
-    return item
-
-# POST create new item (protected route)
-@app.post("/items", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
-async def create_item(item: ItemCreate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Create a new item"""
-    db_item = Item(
-        name=item.name,
-        description=item.description,
-        price=item.price,
-        is_available=item.is_available,
-        owner_id=current_user.id
-    )
-    
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-    
-    return db_item
-
-# PUT update item (protected route)
-@app.put("/items/{item_id}", response_model=ItemResponse)
-async def update_item(item_id: str, item_update: ItemUpdate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Update an existing item (only if owned by current user)"""
-    item = db.query(Item).filter(
-        Item.id == item_id, 
-        Item.owner_id == current_user.id
-    ).first()
-    
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Item with id {item_id} not found"
-        )
-    
-    # Update only provided fields
-    update_data = item_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(item, field, value)
-    
-    db.commit()
-    db.refresh(item)
-    
-    return item
-
-# DELETE item (protected route)
-@app.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Delete an item (only if owned by current user)"""
-    item = db.query(Item).filter(
-        Item.id == item_id, 
-        Item.owner_id == current_user.id
-    ).first()
-    
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Item with id {item_id} not found"
-        )
-    
-    db.delete(item)
-    db.commit()
-    
-    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
-
-# GET items with query parameters (protected route)
-@app.get("/items/search/", response_model=List[ItemResponse])
-async def search_items(
-    name: Optional[str] = None,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
-    is_available: Optional[bool] = None,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Search items with query parameters (only user's items)"""
-    # Start with user's items only
-    query = db.query(Item).filter(Item.owner_id == current_user.id)
-    
-    if name:
-        query = query.filter(Item.name.ilike(f"%{name}%"))
-    
-    if min_price is not None:
-        query = query.filter(Item.price >= min_price)
-    
-    if max_price is not None:
-        query = query.filter(Item.price <= max_price)
-    
-    if is_available is not None:
-        query = query.filter(Item.is_available == is_available)
-    
-    return query.all()
+"""Removed legacy /items CRUD and search endpoints in favor of /market-items"""
 
 # Utility Endpoints
 @app.get("/payment-methods", response_model=List[str])
 async def get_payment_methods():
     """Get list of available payment methods"""
     return get_standard_payment_methods()
+
+# Market Item Endpoints (public marketplace)
+@app.post("/market-items", response_model=MarketItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_market_item(item: MarketItemCreate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Create a market item (public by default)"""
+    db_item = Item(
+        name=item.name,
+        description=item.description,
+        price=item.price,
+        is_available=True,
+        is_public=item.is_public,
+        status=item.status or "active",
+        category=item.category,
+        photos=item.photos,
+        featured_image=item.featured_image,
+        price_range=item.price_range,
+        payment_methods=item.payment_methods,
+        venmo_url=item.venmo_url,
+        facebook_url=item.facebook_url,
+        owner_id=current_user.id
+    )
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return MarketItemResponse(
+        **db_item.__dict__,
+        owner_username=current_user.username
+    )
+
+@app.get("/market-items", response_model=List[MarketItemResponse])
+async def list_market_items(
+    skip: int = 0,
+    limit: int = 50,
+    name: Optional[str] = None,
+    category: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$"),
+    db: Session = Depends(get_db)
+):
+    """Public listing of market items (excludes hidden)"""
+    query = db.query(Item).filter(Item.is_public == True, Item.status != "hidden")
+    if name:
+        query = query.filter(Item.name.ilike(f"%{name}%"))
+    if category:
+        query = query.filter(Item.category == category)
+    if min_price is not None:
+        query = query.filter(Item.price >= min_price)
+    if max_price is not None:
+        query = query.filter(Item.price <= max_price)
+    if status:
+        query = query.filter(Item.status == status)
+    items = query.order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+    result: List[MarketItemResponse] = []
+    for i in items:
+        # Count comments for item
+        comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == i.id).count()
+        result.append(MarketItemResponse(
+            **i.__dict__,
+            owner_username=i.owner.username,
+            comment_count=comment_count
+        ))
+    return result
+
+@app.get("/market-items/{item_id}", response_model=MarketItemResponse)
+async def get_market_item(item_id: str, db: Session = Depends(get_db)):
+    """Get a single market item (must be public unless hidden)"""
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item or item.status == "hidden":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
+    return MarketItemResponse(
+        **item.__dict__,
+        owner_username=item.owner.username,
+        comment_count=comment_count
+    )
+
+@app.post("/market-items/{item_id}/comments", response_model=MarketItemCommentResponse, status_code=status.HTTP_201_CREATED)
+async def create_market_item_comment(
+    item_id: str,
+    comment: MarketItemCommentCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    db_comment = MarketItemComment(
+        content=comment.content,
+        item_id=item_id,
+        user_id=current_user.id
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    return MarketItemCommentResponse(
+        id=db_comment.id,
+        content=db_comment.content,
+        created_at=db_comment.created_at,
+        updated_at=db_comment.updated_at,
+        user_id=current_user.id,
+        username=current_user.username,
+        item_id=item_id
+    )
+
+@app.get("/market-items/{item_id}/comments", response_model=List[MarketItemCommentResponse])
+async def get_market_item_comments(item_id: str, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    comments = db.query(MarketItemComment).filter(MarketItemComment.item_id == item_id).order_by(MarketItemComment.created_at.asc()).all()
+    result: List[MarketItemCommentResponse] = []
+    for c in comments:
+        # fetch username
+        user = db.query(User).filter(User.id == c.user_id).first()
+        result.append(MarketItemCommentResponse(
+            id=c.id,
+            content=c.content,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+            user_id=c.user_id,
+            username=user.username if user else "",
+            item_id=item_id
+        ))
+    return result
+
+@app.delete("/market-items/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_market_item_comment(
+    comment_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    db_comment = db.query(MarketItemComment).filter(MarketItemComment.id == comment_id).first()
+    if not db_comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    if db_comment.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this comment")
+    db.delete(db_comment)
+    db.commit()
+    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+@app.post("/market-items/{item_id}/watch", status_code=status.HTTP_204_NO_CONTENT)
+async def watch_market_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    existing = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id, WatchedItem.item_id == item_id).first()
+    if not existing:
+        db_watch = WatchedItem(user_id=current_user.id, item_id=item_id)
+        db.add(db_watch)
+        db.commit()
+    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+@app.delete("/market-items/{item_id}/watch", status_code=status.HTTP_204_NO_CONTENT)
+async def unwatch_market_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    existing = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id, WatchedItem.item_id == item_id).first()
+    if existing:
+        db.delete(existing)
+        db.commit()
+    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+@app.get("/user/watched-items", response_model=List[MarketItemResponse])
+async def get_watched_items(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    watches = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id).all()
+    item_ids = [w.item_id for w in watches]
+    if not item_ids:
+        return []
+    items = db.query(Item).filter(Item.id.in_(item_ids)).all()
+    result: List[MarketItemResponse] = []
+    for i in items:
+        comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == i.id).count()
+        result.append(MarketItemResponse(
+            **i.__dict__,
+            owner_username=i.owner.username,
+            comment_count=comment_count
+        ))
+    return result
+@app.put("/market-items/{item_id}", response_model=MarketItemResponse)
+async def update_market_item(item_id: str, update: MarketItemUpdate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Update a market item (owner only)"""
+    item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    for field, value in update.dict(exclude_unset=True).items():
+        setattr(item, field, value)
+    db.commit()
+    db.refresh(item)
+    return MarketItemResponse(
+        **item.__dict__,
+        owner_username=current_user.username
+    )
+
+@app.delete("/market-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_market_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Delete a market item (owner only)"""
+    item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    db.delete(item)
+    db.commit()
+    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
 
 # Yard Sale Endpoints
 @app.post("/yard-sales", response_model=YardSaleResponse, status_code=status.HTTP_201_CREATED)

@@ -80,6 +80,17 @@ class Item(Base):
     created_at = Column(DateTime, default=get_mountain_time)
     owner_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
     
+    # Marketplace fields
+    is_public = Column(Boolean, default=True, nullable=False)
+    status = Column(String(20), default="active", nullable=False)  # active, sold, hidden
+    category = Column(String(100), nullable=True)
+    photos = Column(JSON, nullable=True)
+    featured_image = Column(String(500), nullable=True)
+    price_range = Column(String(50), nullable=True)
+    payment_methods = Column(JSON, nullable=True)
+    venmo_url = Column(String(500), nullable=True)
+    facebook_url = Column(String(500), nullable=True)
+    
     # Relationship with user
     owner = relationship("User", back_populates="items")
 
@@ -187,6 +198,41 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
     recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_messages")
+
+class MarketItemComment(Base):
+    __tablename__ = "market_item_comments"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Foreign Keys
+    item_id = Column(CHAR(36), ForeignKey("items.id"), nullable=False)
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    
+    # Relationships
+    item = relationship("Item")
+    user = relationship("User")
+
+class WatchedItem(Base):
+    __tablename__ = "watched_items"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    created_at = Column(DateTime, default=get_mountain_time)
+    
+    # Foreign Keys
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    item_id = Column(CHAR(36), ForeignKey("items.id"), nullable=False)
+    
+    # Relationships
+    user = relationship("User")
+    item = relationship("Item")
+    
+    # Ensure one watch per user per item
+    __table_args__ = (
+        UniqueConstraint('user_id', 'item_id', name='unique_user_item_watch'),
+    )
 
 class UserRating(Base):
     __tablename__ = "user_ratings"
