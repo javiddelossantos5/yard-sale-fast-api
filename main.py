@@ -3228,7 +3228,7 @@ async def proxy_image(
         # if not image_key.startswith(f"images/{user.id}/"):
         #     raise HTTPException(
         #         status_code=status.HTTP_403_FORBIDDEN,
-        #         detail="You can only access your own images"
+        #         detail="You can only access your own image"
         #     )
 
         # Fetch from Garage S3
