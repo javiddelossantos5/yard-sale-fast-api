@@ -111,6 +111,7 @@ class YardSale(Base):
     contact_phone = Column(String(20), nullable=True)
     contact_email = Column(String(100), nullable=True)
     venmo_url = Column(String(500), nullable=True)  # Venmo profile URL
+    facebook_url = Column(String(500), nullable=True)  # Facebook listing/profile URL
     allow_messages = Column(Boolean, default=True)
     
     # Sale Details
