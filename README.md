@@ -7,6 +7,7 @@ A comprehensive yard sale platform where users can post yard sales and discover 
 - **🔐 Authentication**: JWT-based login/logout with password hashing
 - **👤 User Management**: User registration and profile management
 - **🏠 Yard Sale Management**: Create, read, update, delete yard sales
+- **🔗 Social Links**: Optional Venmo and Facebook URLs on yard sales
 - **📍 Location-Based Search**: Find yard sales by city, state, ZIP code
 - **🏷️ Advanced Filtering**: Filter by categories, price range, payment methods
 - **💬 Community Comments**: Comment system for yard sale discussions
@@ -245,6 +246,7 @@ curl -X POST "http://localhost:8000/yard-sales" \
        "categories": ["Furniture", "Clothing", "Electronics", "Toys"],
        "price_range": "Under $50",
        "payment_methods": ["Cash", "Venmo", "Zelle"],
+       "facebook_url": "https://www.facebook.com/marketplace/item/123456789",
        "status": "active"
      }'
 ```
@@ -817,6 +819,8 @@ curl -X DELETE "http://localhost:8000/notifications/1" \
 - `contact_name`: Contact person name (required, 1-100 characters)
 - `contact_phone`: Contact phone number (optional, max 20 characters)
 - `contact_email`: Contact email (optional, max 100 characters)
+- `venmo_url`: Venmo profile URL (optional, up to 500 characters)
+- `facebook_url`: Facebook listing/profile URL (optional, up to 500 characters)
 - `allow_messages`: Allow messages through app (default: true)
 - `categories`: List of item categories (optional)
 - `price_range`: Price range (optional, max 50 characters)
