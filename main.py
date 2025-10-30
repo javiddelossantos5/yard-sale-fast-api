@@ -1302,6 +1302,319 @@ async def list_market_items(
         print(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error: {str(e)}")
 
+# Market Item Messaging Endpoints (must be before /market-items/{item_id} route)
+@app.get("/market-items/conversations", response_model=List[MarketItemConversationResponse])
+async def get_market_item_conversations(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all market item conversations for the current user"""
+    # Get all conversations where user is a participant
+    conversations = db.query(MarketItemConversation).filter(
+        (MarketItemConversation.participant1_id == current_user.id) | 
+        (MarketItemConversation.participant2_id == current_user.id)
+    ).order_by(MarketItemConversation.updated_at.desc()).all()
+    
+    result: List[MarketItemConversationResponse] = []
+    for conv in conversations:
+        # Get item info
+        item = db.query(Item).filter(Item.id == conv.item_id).first()
+        
+        # Get participant usernames
+        p1 = db.query(User).filter(User.id == conv.participant1_id).first()
+        p2 = db.query(User).filter(User.id == conv.participant2_id).first()
+        
+        # Get last message
+        last_msg = db.query(MarketItemMessage).filter(
+            MarketItemMessage.conversation_id == conv.id
+        ).order_by(MarketItemMessage.created_at.desc()).first()
+        
+        last_message_response = None
+        if last_msg:
+            sender = db.query(User).filter(User.id == last_msg.sender_id).first()
+            recipient = db.query(User).filter(User.id == last_msg.recipient_id).first()
+            last_message_response = MarketItemMessageResponse(
+                id=last_msg.id,
+                content=last_msg.content,
+                is_read=last_msg.is_read,
+                created_at=last_msg.created_at,
+                conversation_id=last_msg.conversation_id,
+                sender_id=last_msg.sender_id,
+                sender_username=sender.username if sender else "unknown",
+                recipient_id=last_msg.recipient_id,
+                recipient_username=recipient.username if recipient else "unknown"
+            )
+        
+        # Count unread messages for current user
+        unread_count = db.query(MarketItemMessage).filter(
+            MarketItemMessage.conversation_id == conv.id,
+            MarketItemMessage.recipient_id == current_user.id,
+            MarketItemMessage.is_read == False
+        ).count()
+        
+        result.append(MarketItemConversationResponse(
+            id=conv.id,
+            item_id=conv.item_id,
+            item_name=item.name if item else "Unknown Item",
+            participant1_id=conv.participant1_id,
+            participant1_username=p1.username if p1 else "unknown",
+            participant2_id=conv.participant2_id,
+            participant2_username=p2.username if p2 else "unknown",
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+            last_message=last_message_response,
+            unread_count=unread_count
+        ))
+    return result
+
+@app.post("/market-items/conversations/{conversation_id}/messages", response_model=MarketItemMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_market_item_conversation_message(
+    conversation_id: str,
+    message: MarketItemMessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message in an existing market item conversation"""
+    # Get conversation
+    conversation = db.query(MarketItemConversation).filter(MarketItemConversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify user is a participant
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to send messages in this conversation")
+    
+    # Determine recipient (the other participant)
+    recipient_id = conversation.participant2_id if current_user.id == conversation.participant1_id else conversation.participant1_id
+    
+    # Override with provided recipient_id if specified
+    if message.recipient_id:
+        if message.recipient_id not in [conversation.participant1_id, conversation.participant2_id]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipient must be a conversation participant")
+        recipient_id = message.recipient_id
+    
+    # Create message
+    db_message = MarketItemMessage(
+        content=message.content,
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        recipient_id=recipient_id
+    )
+    db.add(db_message)
+    
+    # Update conversation updated_at
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(db_message)
+    
+    # Get usernames
+    recipient = db.query(User).filter(User.id == recipient_id).first()
+    
+    return MarketItemMessageResponse(
+        id=db_message.id,
+        content=db_message.content,
+        is_read=db_message.is_read,
+        created_at=db_message.created_at,
+        conversation_id=db_message.conversation_id,
+        sender_id=current_user.id,
+        sender_username=current_user.username,
+        recipient_id=recipient_id,
+        recipient_username=recipient.username if recipient else "unknown"
+    )
+
+@app.get("/market-items/conversations/{conversation_id}/messages", response_model=List[MarketItemMessageResponse])
+async def get_market_item_conversation_messages(
+    conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a specific market item conversation"""
+    # Get conversation
+    conversation = db.query(MarketItemConversation).filter(MarketItemConversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify user is a participant
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this conversation")
+    
+    # Get all messages
+    messages = db.query(MarketItemMessage).filter(
+        MarketItemMessage.conversation_id == conversation_id
+    ).order_by(MarketItemMessage.created_at.asc()).all()
+    
+    result: List[MarketItemMessageResponse] = []
+    for msg in messages:
+        sender = db.query(User).filter(User.id == msg.sender_id).first()
+        recipient = db.query(User).filter(User.id == msg.recipient_id).first()
+        result.append(MarketItemMessageResponse(
+            id=msg.id,
+            content=msg.content,
+            is_read=msg.is_read,
+            created_at=msg.created_at,
+            conversation_id=msg.conversation_id,
+            sender_id=msg.sender_id,
+            sender_username=sender.username if sender else "unknown",
+            recipient_id=msg.recipient_id,
+            recipient_username=recipient.username if recipient else "unknown"
+        ))
+    return result
+
+@app.put("/market-items/messages/{message_id}/read", status_code=status.HTTP_200_OK)
+async def mark_market_item_message_read(
+    message_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark a market item message as read"""
+    message = db.query(MarketItemMessage).filter(MarketItemMessage.id == message_id).first()
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    
+    # Only recipient can mark as read
+    if message.recipient_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to mark this message as read")
+    
+    message.is_read = True
+    db.commit()
+    
+    return {"message": "Message marked as read"}
+
+@app.get("/market-items/messages/unread-count", response_model=dict)
+async def get_market_item_unread_count(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get unread message count for market items"""
+    unread_count = db.query(MarketItemMessage).filter(
+        MarketItemMessage.recipient_id == current_user.id,
+        MarketItemMessage.is_read == False
+    ).count()
+    
+    return {"unread_count": unread_count}
+
+@app.post("/market-items/{item_id}/messages", response_model=MarketItemMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_market_item_message(
+    item_id: str,
+    message: MarketItemMessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message to the seller about a market item (creates conversation if needed)"""
+    # Get the item
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    # Determine recipient (seller is the item owner)
+    seller_id = item.owner_id
+    recipient_id = message.recipient_id or seller_id
+    
+    # Can't message yourself
+    if current_user.id == recipient_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send message to yourself")
+    
+    # Find or create conversation
+    conversation = db.query(MarketItemConversation).filter(
+        MarketItemConversation.item_id == item_id,
+        ((MarketItemConversation.participant1_id == current_user.id) & (MarketItemConversation.participant2_id == recipient_id)) |
+        ((MarketItemConversation.participant1_id == recipient_id) & (MarketItemConversation.participant2_id == current_user.id))
+    ).first()
+    
+    if not conversation:
+        # Create new conversation (participant1 is the buyer/inquirer, participant2 is the seller)
+        if current_user.id == seller_id:
+            # Seller messaging someone (shouldn't happen normally, but handle it)
+            conversation = MarketItemConversation(
+                item_id=item_id,
+                participant1_id=recipient_id,
+                participant2_id=current_user.id
+            )
+        else:
+            # Buyer messaging seller
+            conversation = MarketItemConversation(
+                item_id=item_id,
+                participant1_id=current_user.id,
+                participant2_id=seller_id
+            )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+    
+    # Create message
+    db_message = MarketItemMessage(
+        content=message.content,
+        conversation_id=conversation.id,
+        sender_id=current_user.id,
+        recipient_id=recipient_id
+    )
+    db.add(db_message)
+    
+    # Update conversation updated_at
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(db_message)
+    
+    # Get usernames
+    recipient = db.query(User).filter(User.id == recipient_id).first()
+    
+    return MarketItemMessageResponse(
+        id=db_message.id,
+        content=db_message.content,
+        is_read=db_message.is_read,
+        created_at=db_message.created_at,
+        conversation_id=db_message.conversation_id,
+        sender_id=current_user.id,
+        sender_username=current_user.username,
+        recipient_id=recipient_id,
+        recipient_username=recipient.username if recipient else "unknown"
+    )
+
+@app.get("/market-items/{item_id}/messages", response_model=List[MarketItemMessageResponse])
+async def get_market_item_messages(
+    item_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a conversation about a specific market item"""
+    # Get the item
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    # Find conversation for this item involving current user
+    conversation = db.query(MarketItemConversation).filter(
+        MarketItemConversation.item_id == item_id,
+        ((MarketItemConversation.participant1_id == current_user.id) | (MarketItemConversation.participant2_id == current_user.id))
+    ).first()
+    
+    if not conversation:
+        return []  # No conversation yet
+    
+    # Get all messages for this conversation
+    messages = db.query(MarketItemMessage).filter(
+        MarketItemMessage.conversation_id == conversation.id
+    ).order_by(MarketItemMessage.created_at.asc()).all()
+    
+    result: List[MarketItemMessageResponse] = []
+    for msg in messages:
+        sender = db.query(User).filter(User.id == msg.sender_id).first()
+        recipient = db.query(User).filter(User.id == msg.recipient_id).first()
+        result.append(MarketItemMessageResponse(
+            id=msg.id,
+            content=msg.content,
+            is_read=msg.is_read,
+            created_at=msg.created_at,
+            conversation_id=msg.conversation_id,
+            sender_id=msg.sender_id,
+            sender_username=sender.username if sender else "unknown",
+            recipient_id=msg.recipient_id,
+            recipient_username=recipient.username if recipient else "unknown"
+        ))
+    return result
+
 @app.get("/market-items/{item_id}", response_model=MarketItemResponse)
 async def get_market_item(item_id: str, authorization: Optional[str] = Header(None, alias="Authorization"), db: Session = Depends(get_db)):
     """Get a single market item (must be public unless hidden)"""
@@ -1458,319 +1771,6 @@ async def get_watched_items(
             **price_reduction
         ))
     return result
-
-# Market Item Messaging Endpoints
-@app.post("/market-items/{item_id}/messages", response_model=MarketItemMessageResponse, status_code=status.HTTP_201_CREATED)
-async def send_market_item_message(
-    item_id: str,
-    message: MarketItemMessageCreate,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Send a message to the seller about a market item (creates conversation if needed)"""
-    # Get the item
-    item = db.query(Item).filter(Item.id == item_id).first()
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    
-    # Determine recipient (seller is the item owner)
-    seller_id = item.owner_id
-    recipient_id = message.recipient_id or seller_id
-    
-    # Can't message yourself
-    if current_user.id == recipient_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send message to yourself")
-    
-    # Find or create conversation
-    conversation = db.query(MarketItemConversation).filter(
-        MarketItemConversation.item_id == item_id,
-        ((MarketItemConversation.participant1_id == current_user.id) & (MarketItemConversation.participant2_id == recipient_id)) |
-        ((MarketItemConversation.participant1_id == recipient_id) & (MarketItemConversation.participant2_id == current_user.id))
-    ).first()
-    
-    if not conversation:
-        # Create new conversation (participant1 is the buyer/inquirer, participant2 is the seller)
-        if current_user.id == seller_id:
-            # Seller messaging someone (shouldn't happen normally, but handle it)
-            conversation = MarketItemConversation(
-                item_id=item_id,
-                participant1_id=recipient_id,
-                participant2_id=current_user.id
-            )
-        else:
-            # Buyer messaging seller
-            conversation = MarketItemConversation(
-                item_id=item_id,
-                participant1_id=current_user.id,
-                participant2_id=seller_id
-            )
-        db.add(conversation)
-        db.commit()
-        db.refresh(conversation)
-    
-    # Create message
-    db_message = MarketItemMessage(
-        content=message.content,
-        conversation_id=conversation.id,
-        sender_id=current_user.id,
-        recipient_id=recipient_id
-    )
-    db.add(db_message)
-    
-    # Update conversation updated_at
-    conversation.updated_at = get_mountain_time()
-    
-    db.commit()
-    db.refresh(db_message)
-    
-    # Get usernames
-    recipient = db.query(User).filter(User.id == recipient_id).first()
-    
-    return MarketItemMessageResponse(
-        id=db_message.id,
-        content=db_message.content,
-        is_read=db_message.is_read,
-        created_at=db_message.created_at,
-        conversation_id=db_message.conversation_id,
-        sender_id=current_user.id,
-        sender_username=current_user.username,
-        recipient_id=recipient_id,
-        recipient_username=recipient.username if recipient else "unknown"
-    )
-
-@app.get("/market-items/{item_id}/messages", response_model=List[MarketItemMessageResponse])
-async def get_market_item_messages(
-    item_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get all messages for a conversation about a specific market item"""
-    # Get the item
-    item = db.query(Item).filter(Item.id == item_id).first()
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    
-    # Find conversation for this item involving current user
-    conversation = db.query(MarketItemConversation).filter(
-        MarketItemConversation.item_id == item_id,
-        ((MarketItemConversation.participant1_id == current_user.id) | (MarketItemConversation.participant2_id == current_user.id))
-    ).first()
-    
-    if not conversation:
-        return []  # No conversation yet
-    
-    # Get all messages for this conversation
-    messages = db.query(MarketItemMessage).filter(
-        MarketItemMessage.conversation_id == conversation.id
-    ).order_by(MarketItemMessage.created_at.asc()).all()
-    
-    result: List[MarketItemMessageResponse] = []
-    for msg in messages:
-        sender = db.query(User).filter(User.id == msg.sender_id).first()
-        recipient = db.query(User).filter(User.id == msg.recipient_id).first()
-        result.append(MarketItemMessageResponse(
-            id=msg.id,
-            content=msg.content,
-            is_read=msg.is_read,
-            created_at=msg.created_at,
-            conversation_id=msg.conversation_id,
-            sender_id=msg.sender_id,
-            sender_username=sender.username if sender else "unknown",
-            recipient_id=msg.recipient_id,
-            recipient_username=recipient.username if recipient else "unknown"
-        ))
-    return result
-
-@app.post("/market-items/conversations/{conversation_id}/messages", response_model=MarketItemMessageResponse, status_code=status.HTTP_201_CREATED)
-async def send_market_item_conversation_message(
-    conversation_id: str,
-    message: MarketItemMessageCreate,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Send a message in an existing market item conversation"""
-    # Get conversation
-    conversation = db.query(MarketItemConversation).filter(MarketItemConversation.id == conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    
-    # Verify user is a participant
-    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to send messages in this conversation")
-    
-    # Determine recipient (the other participant)
-    recipient_id = conversation.participant2_id if current_user.id == conversation.participant1_id else conversation.participant1_id
-    
-    # Override with provided recipient_id if specified
-    if message.recipient_id:
-        if message.recipient_id not in [conversation.participant1_id, conversation.participant2_id]:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recipient must be a conversation participant")
-        recipient_id = message.recipient_id
-    
-    # Create message
-    db_message = MarketItemMessage(
-        content=message.content,
-        conversation_id=conversation_id,
-        sender_id=current_user.id,
-        recipient_id=recipient_id
-    )
-    db.add(db_message)
-    
-    # Update conversation updated_at
-    conversation.updated_at = get_mountain_time()
-    
-    db.commit()
-    db.refresh(db_message)
-    
-    # Get usernames
-    recipient = db.query(User).filter(User.id == recipient_id).first()
-    
-    return MarketItemMessageResponse(
-        id=db_message.id,
-        content=db_message.content,
-        is_read=db_message.is_read,
-        created_at=db_message.created_at,
-        conversation_id=db_message.conversation_id,
-        sender_id=current_user.id,
-        sender_username=current_user.username,
-        recipient_id=recipient_id,
-        recipient_username=recipient.username if recipient else "unknown"
-    )
-
-@app.get("/market-items/conversations/{conversation_id}/messages", response_model=List[MarketItemMessageResponse])
-async def get_market_item_conversation_messages(
-    conversation_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get all messages for a specific market item conversation"""
-    # Get conversation
-    conversation = db.query(MarketItemConversation).filter(MarketItemConversation.id == conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    
-    # Verify user is a participant
-    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this conversation")
-    
-    # Get all messages
-    messages = db.query(MarketItemMessage).filter(
-        MarketItemMessage.conversation_id == conversation_id
-    ).order_by(MarketItemMessage.created_at.asc()).all()
-    
-    result: List[MarketItemMessageResponse] = []
-    for msg in messages:
-        sender = db.query(User).filter(User.id == msg.sender_id).first()
-        recipient = db.query(User).filter(User.id == msg.recipient_id).first()
-        result.append(MarketItemMessageResponse(
-            id=msg.id,
-            content=msg.content,
-            is_read=msg.is_read,
-            created_at=msg.created_at,
-            conversation_id=msg.conversation_id,
-            sender_id=msg.sender_id,
-            sender_username=sender.username if sender else "unknown",
-            recipient_id=msg.recipient_id,
-            recipient_username=recipient.username if recipient else "unknown"
-        ))
-    return result
-
-@app.get("/market-items/conversations", response_model=List[MarketItemConversationResponse])
-async def get_market_item_conversations(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get all market item conversations for the current user"""
-    # Get all conversations where user is a participant
-    conversations = db.query(MarketItemConversation).filter(
-        (MarketItemConversation.participant1_id == current_user.id) | 
-        (MarketItemConversation.participant2_id == current_user.id)
-    ).order_by(MarketItemConversation.updated_at.desc()).all()
-    
-    result: List[MarketItemConversationResponse] = []
-    for conv in conversations:
-        # Get item info
-        item = db.query(Item).filter(Item.id == conv.item_id).first()
-        
-        # Get participant usernames
-        p1 = db.query(User).filter(User.id == conv.participant1_id).first()
-        p2 = db.query(User).filter(User.id == conv.participant2_id).first()
-        
-        # Get last message
-        last_msg = db.query(MarketItemMessage).filter(
-            MarketItemMessage.conversation_id == conv.id
-        ).order_by(MarketItemMessage.created_at.desc()).first()
-        
-        last_message_response = None
-        if last_msg:
-            sender = db.query(User).filter(User.id == last_msg.sender_id).first()
-            recipient = db.query(User).filter(User.id == last_msg.recipient_id).first()
-            last_message_response = MarketItemMessageResponse(
-                id=last_msg.id,
-                content=last_msg.content,
-                is_read=last_msg.is_read,
-                created_at=last_msg.created_at,
-                conversation_id=last_msg.conversation_id,
-                sender_id=last_msg.sender_id,
-                sender_username=sender.username if sender else "unknown",
-                recipient_id=last_msg.recipient_id,
-                recipient_username=recipient.username if recipient else "unknown"
-            )
-        
-        # Count unread messages for current user
-        unread_count = db.query(MarketItemMessage).filter(
-            MarketItemMessage.conversation_id == conv.id,
-            MarketItemMessage.recipient_id == current_user.id,
-            MarketItemMessage.is_read == False
-        ).count()
-        
-        result.append(MarketItemConversationResponse(
-            id=conv.id,
-            item_id=conv.item_id,
-            item_name=item.name if item else "Unknown Item",
-            participant1_id=conv.participant1_id,
-            participant1_username=p1.username if p1 else "unknown",
-            participant2_id=conv.participant2_id,
-            participant2_username=p2.username if p2 else "unknown",
-            created_at=conv.created_at,
-            updated_at=conv.updated_at,
-            last_message=last_message_response,
-            unread_count=unread_count
-        ))
-    return result
-
-@app.put("/market-items/messages/{message_id}/read", status_code=status.HTTP_200_OK)
-async def mark_market_item_message_read(
-    message_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Mark a market item message as read"""
-    message = db.query(MarketItemMessage).filter(MarketItemMessage.id == message_id).first()
-    if not message:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
-    
-    # Only recipient can mark as read
-    if message.recipient_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to mark this message as read")
-    
-    message.is_read = True
-    db.commit()
-    
-    return {"message": "Message marked as read"}
-
-@app.get("/market-items/messages/unread-count", response_model=dict)
-async def get_market_item_unread_count(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get unread message count for market items"""
-    unread_count = db.query(MarketItemMessage).filter(
-        MarketItemMessage.recipient_id == current_user.id,
-        MarketItemMessage.is_read == False
-    ).count()
-    
-    return {"unread_count": unread_count}
 
 @app.put("/market-items/{item_id}", response_model=MarketItemResponse)
 async def update_market_item(item_id: str, update: MarketItemUpdate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
