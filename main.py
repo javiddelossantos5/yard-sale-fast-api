@@ -19,6 +19,24 @@ import os
 from pathlib import Path
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
 from database import MarketItemComment, WatchedItem
+def get_optional_user_from_auth_header(authorization: Optional[str], db: Session) -> Optional[User]:
+    """Return current user if Authorization header contains a valid Bearer token, else None."""
+    if not authorization:
+        return None
+    try:
+        scheme, token = authorization.split(" ", 1)
+        if scheme.lower() != "bearer":
+            return None
+        if token in token_blacklist:
+            return None
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if not username:
+            return None
+        user = get_user_by_username(db, username)
+        return user
+    except Exception:
+        return None
 from contextlib import asynccontextmanager
 from datetime import date, time
 from typing import List, Optional
@@ -276,6 +294,7 @@ class MarketItemResponse(BaseModel):
     created_at: datetime
     owner_id: str
     owner_username: str
+    is_watched: Optional[bool] = None
 
 # Market item comments
 class MarketItemCommentCreate(BaseModel):
@@ -1080,6 +1099,7 @@ async def list_market_items(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
     status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$"),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
     """Public listing of market items (excludes hidden)"""
@@ -1095,6 +1115,12 @@ async def list_market_items(
     if status:
         query = query.filter(Item.status == status)
     items = query.order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+    # Optional current user for is_watched
+    current_user = get_optional_user_from_auth_header(authorization, db)
+    watched_ids: set = set()
+    if current_user:
+        watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id).all()
+        watched_ids = {w.item_id for w in watched}
     result: List[MarketItemResponse] = []
     for i in items:
         # Count comments for item
@@ -1102,21 +1128,27 @@ async def list_market_items(
         result.append(MarketItemResponse(
             **i.__dict__,
             owner_username=i.owner.username,
-            comment_count=comment_count
+            comment_count=comment_count,
+            is_watched=(i.id in watched_ids) if current_user else None
         ))
     return result
 
 @app.get("/market-items/{item_id}", response_model=MarketItemResponse)
-async def get_market_item(item_id: str, db: Session = Depends(get_db)):
+async def get_market_item(item_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     """Get a single market item (must be public unless hidden)"""
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item or item.status == "hidden":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
+    current_user = get_optional_user_from_auth_header(authorization, db)
+    is_watched = None
+    if current_user:
+        is_watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id, WatchedItem.item_id == item.id).first() is not None
     return MarketItemResponse(
         **item.__dict__,
         owner_username=item.owner.username,
-        comment_count=comment_count
+        comment_count=comment_count,
+        is_watched=is_watched
     )
 
 @app.post("/market-items/{item_id}/comments", response_model=MarketItemCommentResponse, status_code=status.HTTP_201_CREATED)
@@ -1203,20 +1235,42 @@ async def unwatch_market_item(item_id: str, current_user: User = Depends(get_cur
         db.commit()
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
 
-@app.get("/user/watched-items", response_model=List[MarketItemResponse])
-async def get_watched_items(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    watches = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id).all()
-    item_ids = [w.item_id for w in watches]
-    if not item_ids:
-        return []
-    items = db.query(Item).filter(Item.id.in_(item_ids)).all()
+@app.get("/api/user/watched-items", response_model=List[MarketItemResponse])
+async def get_watched_items(
+    current_user: User = Depends(get_current_active_user),
+    status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get all market items the authenticated user has watched"""
+    # Query watched items for the user, joining with items
+    query = db.query(WatchedItem, Item).join(Item, WatchedItem.item_id == Item.id).filter(
+        WatchedItem.user_id == current_user.id,
+        Item.is_public == True
+    )
+    
+    # Filter by status if provided (default: active)
+    if status:
+        query = query.filter(Item.status == status)
+    else:
+        query = query.filter(Item.status == "active")
+    
+    # Order by most recently watched (watched_items.created_at desc), fallback to item.created_at
+    query = query.order_by(WatchedItem.created_at.desc(), Item.created_at.desc())
+    
+    # Apply pagination
+    watched_items_pairs = query.offset(offset).limit(limit).all()
+    
+    # Build response
     result: List[MarketItemResponse] = []
-    for i in items:
-        comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == i.id).count()
+    for watched_item, item in watched_items_pairs:
+        comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
         result.append(MarketItemResponse(
-            **i.__dict__,
-            owner_username=i.owner.username,
-            comment_count=comment_count
+            **item.__dict__,
+            owner_username=item.owner.username,
+            comment_count=comment_count,
+            is_watched=True  # Always true since these are from watchlist
         ))
     return result
 @app.put("/market-items/{item_id}", response_model=MarketItemResponse)
