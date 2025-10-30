@@ -87,9 +87,14 @@ class Item(Base):
     photos = Column(JSON, nullable=True)
     featured_image = Column(String(500), nullable=True)
     price_range = Column(String(50), nullable=True)
+    accepts_best_offer = Column(Boolean, default=False, nullable=False)  # Whether seller accepts best offers
     payment_methods = Column(JSON, nullable=True)
     venmo_url = Column(String(500), nullable=True)
     facebook_url = Column(String(500), nullable=True)
+    
+    # Price tracking for reductions
+    original_price = Column(Float, nullable=True)  # Original price when item was created
+    last_price_change_date = Column(DateTime, nullable=True)  # When price was last changed
     
     # Relationship with user
     owner = relationship("User", back_populates="items")

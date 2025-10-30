@@ -18,7 +18,30 @@ from botocore.exceptions import ClientError
 import os
 from pathlib import Path
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
-from database import MarketItemComment, WatchedItem
+from database import MarketItemComment, WatchedItem, get_mountain_time
+
+def calculate_price_reduction_fields(item: Item) -> dict:
+    """Calculate price reduction fields for MarketItemResponse"""
+    price_reduced = False
+    price_reduction_amount = None
+    price_reduction_percentage = None
+    
+    # Safely handle missing columns (if migration hasn't been run)
+    original_price = getattr(item, 'original_price', None)
+    current_price = getattr(item, 'price', 0)
+    
+    if original_price and original_price > 0 and current_price > 0:
+        if current_price < original_price:
+            price_reduced = True
+            price_reduction_amount = original_price - current_price
+            price_reduction_percentage = round((price_reduction_amount / original_price) * 100, 2)
+    
+    return {
+        "price_reduced": price_reduced,
+        "price_reduction_amount": price_reduction_amount,
+        "price_reduction_percentage": price_reduction_percentage
+    }
+
 def get_optional_user_from_auth_header(authorization: Optional[str], db: Session) -> Optional[User]:
     """Return current user if Authorization header contains a valid Bearer token, else None."""
     if not authorization:
@@ -257,6 +280,7 @@ class MarketItemCreate(BaseModel):
     photos: Optional[List[str]] = None
     featured_image: Optional[str] = Field(None, max_length=500)
     price_range: Optional[str] = Field(None, max_length=50)
+    accepts_best_offer: bool = Field(False, description="Whether seller accepts best offers")
     payment_methods: Optional[List[str]] = None
     venmo_url: Optional[str] = Field(None, max_length=500)
     facebook_url: Optional[str] = Field(None, max_length=500)
@@ -271,6 +295,7 @@ class MarketItemUpdate(BaseModel):
     photos: Optional[List[str]] = None
     featured_image: Optional[str] = Field(None, max_length=500)
     price_range: Optional[str] = Field(None, max_length=50)
+    accepts_best_offer: Optional[bool] = None
     payment_methods: Optional[List[str]] = None
     venmo_url: Optional[str] = Field(None, max_length=500)
     facebook_url: Optional[str] = Field(None, max_length=500)
@@ -287,6 +312,7 @@ class MarketItemResponse(BaseModel):
     photos: Optional[List[str]]
     featured_image: Optional[str]
     price_range: Optional[str]
+    accepts_best_offer: bool
     payment_methods: Optional[List[str]]
     venmo_url: Optional[str]
     facebook_url: Optional[str]
@@ -295,6 +321,12 @@ class MarketItemResponse(BaseModel):
     owner_id: str
     owner_username: str
     is_watched: Optional[bool] = None
+    # Price reduction tracking
+    original_price: Optional[float] = None
+    last_price_change_date: Optional[datetime] = None
+    price_reduced: bool = False  # True if current price < original price
+    price_reduction_amount: Optional[float] = None  # original_price - current_price
+    price_reduction_percentage: Optional[float] = None  # percentage reduction
 
 # Market item comments
 class MarketItemCommentCreate(BaseModel):
@@ -1070,6 +1102,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         name=item.name,
         description=item.description,
         price=item.price,
+        original_price=item.price,  # Set original price on creation
         is_available=True,
         is_public=item.is_public,
         status=item.status or "active",
@@ -1077,6 +1110,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         photos=item.photos,
         featured_image=item.featured_image,
         price_range=item.price_range,
+        accepts_best_offer=item.accepts_best_offer,
         payment_methods=item.payment_methods,
         venmo_url=item.venmo_url,
         facebook_url=item.facebook_url,
@@ -1085,9 +1119,11 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
+    price_reduction = calculate_price_reduction_fields(db_item)
     return MarketItemResponse(
         **db_item.__dict__,
-        owner_username=current_user.username
+        owner_username=current_user.username,
+        **price_reduction
     )
 
 @app.get("/market-items", response_model=List[MarketItemResponse])
@@ -1098,58 +1134,166 @@ async def list_market_items(
     category: Optional[str] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$"),
-    authorization: Optional[str] = Header(None),
+    item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$", alias="status"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db)
 ):
     """Public listing of market items (excludes hidden)"""
-    query = db.query(Item).filter(Item.is_public == True, Item.status != "hidden")
-    if name:
-        query = query.filter(Item.name.ilike(f"%{name}%"))
-    if category:
-        query = query.filter(Item.category == category)
-    if min_price is not None:
-        query = query.filter(Item.price >= min_price)
-    if max_price is not None:
-        query = query.filter(Item.price <= max_price)
-    if status:
-        query = query.filter(Item.status == status)
-    items = query.order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
-    # Optional current user for is_watched
-    current_user = get_optional_user_from_auth_header(authorization, db)
-    watched_ids: set = set()
-    if current_user:
-        watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id).all()
-        watched_ids = {w.item_id for w in watched}
-    result: List[MarketItemResponse] = []
-    for i in items:
-        # Count comments for item
-        comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == i.id).count()
-        result.append(MarketItemResponse(
-            **i.__dict__,
-            owner_username=i.owner.username,
-            comment_count=comment_count,
-            is_watched=(i.id in watched_ids) if current_user else None
-        ))
-    return result
+    try:
+        from sqlalchemy.orm import joinedload
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+        
+        query = db.query(Item)
+        
+        # Try to add filters, but skip if columns don't exist
+        try:
+            query = query.filter(Item.is_public == True)
+        except (OperationalError, ProgrammingError, AttributeError):
+            pass  # Column doesn't exist, skip filter
+        
+        try:
+            if item_status:
+                query = query.filter(Item.status == item_status)
+            else:
+                query = query.filter(Item.status != "hidden")
+        except (OperationalError, ProgrammingError, AttributeError):
+            pass  # Column doesn't exist, skip filter
+        
+        if name:
+            query = query.filter(Item.name.ilike(f"%{name}%"))
+        if category:
+            query = query.filter(Item.category == category)
+        if min_price is not None:
+            query = query.filter(Item.price >= min_price)
+        if max_price is not None:
+            query = query.filter(Item.price <= max_price)
+        
+        # Eagerly load owner relationship to avoid lazy loading issues
+        # Wrap the actual query execution in try/except to catch DB errors
+        try:
+            items = query.options(joinedload(Item.owner)).order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+        except (OperationalError, ProgrammingError) as db_error:
+            # If query fails due to missing columns, try a simpler query
+            print(f"Query failed with columns, trying simpler query: {db_error}")
+            query = db.query(Item)
+            if name:
+                query = query.filter(Item.name.ilike(f"%{name}%"))
+            if category:
+                query = query.filter(Item.category == category)
+            if min_price is not None:
+                query = query.filter(Item.price >= min_price)
+            if max_price is not None:
+                query = query.filter(Item.price <= max_price)
+            items = query.options(joinedload(Item.owner)).order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+        
+        # Optional current user for is_watched
+        current_user = None
+        watched_ids: set = set()
+        if authorization:
+            try:
+                current_user = get_optional_user_from_auth_header(authorization, db)
+                if current_user:
+                    try:
+                        watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id).all()
+                        watched_ids = {w.item_id for w in watched}
+                    except Exception:
+                        # WatchedItem table might not exist, skip
+                        watched_ids = set()
+            except Exception:
+                # Auth might fail, continue without user
+                current_user = None
+                watched_ids = set()
+        
+        result: List[MarketItemResponse] = []
+        for i in items:
+            try:
+                # Count comments for item (safe if table doesn't exist)
+                try:
+                    comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == i.id).count()
+                except Exception:
+                    comment_count = 0
+                
+                price_reduction = calculate_price_reduction_fields(i)
+                
+                # Ensure we have owner relationship loaded
+                owner_username = i.owner.username if i.owner else "unknown"
+                
+                # Safely extract item fields, filtering out SQLAlchemy internal attributes
+                item_dict = {k: v for k, v in i.__dict__.items() if not k.startswith('_')}
+                
+                # Get price reduction fields safely
+                original_price = getattr(i, 'original_price', None)
+                last_price_change_date = getattr(i, 'last_price_change_date', None)
+                
+                result.append(MarketItemResponse(
+                    id=item_dict.get('id', str(i.id)),
+                    name=item_dict.get('name', ''),
+                    description=item_dict.get('description'),
+                    price=item_dict.get('price', 0.0),
+                    is_available=item_dict.get('is_available', True),
+                    is_public=item_dict.get('is_public', True),
+                    status=item_dict.get('status', 'active'),
+                    category=item_dict.get('category'),
+                    photos=item_dict.get('photos'),
+                    featured_image=item_dict.get('featured_image'),
+                    price_range=item_dict.get('price_range'),
+                    accepts_best_offer=item_dict.get('accepts_best_offer', False),
+                    payment_methods=item_dict.get('payment_methods'),
+                    venmo_url=item_dict.get('venmo_url'),
+                    facebook_url=item_dict.get('facebook_url'),
+                    created_at=item_dict.get('created_at'),
+                    owner_id=item_dict.get('owner_id', ''),
+                    owner_username=owner_username,
+                    comment_count=comment_count,
+                    is_watched=(i.id in watched_ids) if current_user else None,
+                    original_price=original_price,
+                    last_price_change_date=last_price_change_date,
+                    **price_reduction
+                ))
+            except Exception as item_error:
+                import traceback
+                print(f"Error processing item {i.id}: {item_error}")
+                print(traceback.format_exc())
+                # Skip this item and continue
+                continue
+        return result
+    except Exception as e:
+        import traceback
+        print(f"Error in list_market_items: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error: {str(e)}")
 
 @app.get("/market-items/{item_id}", response_model=MarketItemResponse)
-async def get_market_item(item_id: str, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+async def get_market_item(item_id: str, authorization: Optional[str] = Header(None, alias="Authorization"), db: Session = Depends(get_db)):
     """Get a single market item (must be public unless hidden)"""
-    item = db.query(Item).filter(Item.id == item_id).first()
-    if not item or item.status == "hidden":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
-    current_user = get_optional_user_from_auth_header(authorization, db)
-    is_watched = None
-    if current_user:
-        is_watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id, WatchedItem.item_id == item.id).first() is not None
-    return MarketItemResponse(
-        **item.__dict__,
-        owner_username=item.owner.username,
-        comment_count=comment_count,
-        is_watched=is_watched
-    )
+    try:
+        from sqlalchemy.orm import joinedload
+        item = db.query(Item).options(joinedload(Item.owner)).filter(Item.id == item_id).first()
+        if not item or item.status == "hidden":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+        comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
+        current_user = None
+        is_watched = None
+        if authorization:
+            current_user = get_optional_user_from_auth_header(authorization, db)
+            if current_user:
+                is_watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id, WatchedItem.item_id == item.id).first() is not None
+        price_reduction = calculate_price_reduction_fields(item)
+        owner_username = item.owner.username if item.owner else "unknown"
+        return MarketItemResponse(
+            **item.__dict__,
+            owner_username=owner_username,
+            comment_count=comment_count,
+            is_watched=is_watched,
+            **price_reduction
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Error in get_market_item: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error: {str(e)}")
 
 @app.post("/market-items/{item_id}/comments", response_model=MarketItemCommentResponse, status_code=status.HTTP_201_CREATED)
 async def create_market_item_comment(
@@ -1238,7 +1382,7 @@ async def unwatch_market_item(item_id: str, current_user: User = Depends(get_cur
 @app.get("/api/user/watched-items", response_model=List[MarketItemResponse])
 async def get_watched_items(
     current_user: User = Depends(get_current_active_user),
-    status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$"),
+    item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$", alias="status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db)
@@ -1251,8 +1395,8 @@ async def get_watched_items(
     )
     
     # Filter by status if provided (default: active)
-    if status:
-        query = query.filter(Item.status == status)
+    if item_status:
+        query = query.filter(Item.status == item_status)
     else:
         query = query.filter(Item.status == "active")
     
@@ -1266,11 +1410,13 @@ async def get_watched_items(
     result: List[MarketItemResponse] = []
     for watched_item, item in watched_items_pairs:
         comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
+        price_reduction = calculate_price_reduction_fields(item)
         result.append(MarketItemResponse(
             **item.__dict__,
             owner_username=item.owner.username,
             comment_count=comment_count,
-            is_watched=True  # Always true since these are from watchlist
+            is_watched=True,  # Always true since these are from watchlist
+            **price_reduction
         ))
     return result
 @app.put("/market-items/{item_id}", response_model=MarketItemResponse)
@@ -1279,13 +1425,31 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
     item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    for field, value in update.dict(exclude_unset=True).items():
+    
+    # Track price changes
+    old_price = item.price
+    update_data = update.dict(exclude_unset=True)
+    
+    # If original_price is not set (legacy items), set it to current price before updating
+    if item.original_price is None:
+        item.original_price = old_price
+    
+    # Check if price is being changed
+    if "price" in update_data:
+        new_price = update_data["price"]
+        if new_price != old_price:
+            item.last_price_change_date = get_mountain_time()
+    
+    for field, value in update_data.items():
         setattr(item, field, value)
+    
     db.commit()
     db.refresh(item)
+    price_reduction = calculate_price_reduction_fields(item)
     return MarketItemResponse(
         **item.__dict__,
-        owner_username=current_user.username
+        owner_username=current_user.username,
+        **price_reduction
     )
 
 @app.delete("/market-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
