@@ -243,6 +243,40 @@ class WatchedItem(Base):
         UniqueConstraint('user_id', 'item_id', name='unique_user_item_watch'),
     )
 
+class MarketItemConversation(Base):
+    __tablename__ = "market_item_conversations"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    item_id = Column(CHAR(36), ForeignKey("items.id"), nullable=False)
+    participant1_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # Buyer/Inquirer
+    participant2_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # Seller (item owner)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Relationships
+    item = relationship("Item")
+    participant1 = relationship("User", foreign_keys=[participant1_id])
+    participant2 = relationship("User", foreign_keys=[participant2_id])
+    messages = relationship("MarketItemMessage", back_populates="conversation", cascade="all, delete-orphan")
+
+class MarketItemMessage(Base):
+    __tablename__ = "market_item_messages"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    content = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=get_mountain_time)
+    
+    # Foreign Keys
+    conversation_id = Column(CHAR(36), ForeignKey("market_item_conversations.id"), nullable=False)
+    sender_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    
+    # Relationships
+    conversation = relationship("MarketItemConversation", back_populates="messages")
+    sender = relationship("User", foreign_keys=[sender_id])
+    recipient = relationship("User", foreign_keys=[recipient_id])
+
 class UserRating(Base):
     __tablename__ = "user_ratings"
     
