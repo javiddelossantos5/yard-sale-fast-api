@@ -284,6 +284,8 @@ class MarketItemCreate(BaseModel):
     payment_methods: Optional[List[str]] = None
     venmo_url: Optional[str] = Field(None, max_length=500)
     facebook_url: Optional[str] = Field(None, max_length=500)
+    contact_phone: Optional[str] = Field(None, max_length=20, description="Seller's phone number for customer communication")
+    contact_email: Optional[str] = Field(None, max_length=100, description="Seller's email for customer communication")
 
 class MarketItemUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -299,6 +301,8 @@ class MarketItemUpdate(BaseModel):
     payment_methods: Optional[List[str]] = None
     venmo_url: Optional[str] = Field(None, max_length=500)
     facebook_url: Optional[str] = Field(None, max_length=500)
+    contact_phone: Optional[str] = Field(None, max_length=20)
+    contact_email: Optional[str] = Field(None, max_length=100)
 
 class MarketItemResponse(BaseModel):
     id: str
@@ -316,6 +320,8 @@ class MarketItemResponse(BaseModel):
     payment_methods: Optional[List[str]]
     venmo_url: Optional[str]
     facebook_url: Optional[str]
+    contact_phone: Optional[str]
+    contact_email: Optional[str]
     comment_count: int = 0
     created_at: datetime
     owner_id: str
@@ -1114,6 +1120,8 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         payment_methods=item.payment_methods,
         venmo_url=item.venmo_url,
         facebook_url=item.facebook_url,
+        contact_phone=item.contact_phone,
+        contact_email=item.contact_email,
         owner_id=current_user.id
     )
     db.add(db_item)
@@ -1241,6 +1249,8 @@ async def list_market_items(
                     payment_methods=item_dict.get('payment_methods'),
                     venmo_url=item_dict.get('venmo_url'),
                     facebook_url=item_dict.get('facebook_url'),
+                    contact_phone=item_dict.get('contact_phone'),
+                    contact_email=item_dict.get('contact_email'),
                     created_at=item_dict.get('created_at'),
                     owner_id=item_dict.get('owner_id', ''),
                     owner_username=owner_username,

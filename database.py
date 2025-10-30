@@ -92,6 +92,10 @@ class Item(Base):
     venmo_url = Column(String(500), nullable=True)
     facebook_url = Column(String(500), nullable=True)
     
+    # Contact information for customer communication
+    contact_phone = Column(String(20), nullable=True)  # Seller's phone number for this item
+    contact_email = Column(String(100), nullable=True)  # Seller's email for this item
+    
     # Price tracking for reductions
     original_price = Column(Float, nullable=True)  # Original price when item was created
     last_price_change_date = Column(DateTime, nullable=True)  # When price was last changed
