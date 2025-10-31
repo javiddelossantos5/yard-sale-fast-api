@@ -5,13 +5,15 @@ Test MinIO connection and bucket operations
 
 import boto3
 from botocore.exceptions import ClientError
+import os
 
 # MinIO Configuration
-MINIO_ENDPOINT_URL = "http://10.1.2.165:9000"
-MINIO_ACCESS_KEY_ID = "minioadmin"
-MINIO_SECRET_ACCESS_KEY = "minioadmin"
-MINIO_BUCKET_NAME = "yardsale"
-MINIO_REGION = "us-east-1"
+# Use environment variables if set, otherwise use defaults
+MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "https://s3image.yardsalefinders.com")
+MINIO_ACCESS_KEY_ID = os.getenv("MINIO_ACCESS_KEY_ID", "minioadmin")
+MINIO_SECRET_ACCESS_KEY = os.getenv("MINIO_SECRET_ACCESS_KEY", "minioadmin")
+MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "yardsale")
+MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 
 def test_minio_connection():
     """Test MinIO connection and basic operations"""

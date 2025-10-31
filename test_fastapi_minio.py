@@ -36,7 +36,7 @@ def test_fastapi_minio():
         print(f"❌ Root endpoint error: {e}")
     
     print("\n📋 MinIO Integration Summary:")
-    print("✅ MinIO server: http://10.1.2.165:9000")
+    print("✅ MinIO server: https://s3image.yardsalefinders.com")
     print("✅ Bucket: yardsale")
     print("✅ FastAPI configured to use MinIO")
     print("✅ Image proxy endpoint ready")
