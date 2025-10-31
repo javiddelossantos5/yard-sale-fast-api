@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 import uuid
 import boto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
 import os
 from pathlib import Path
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
@@ -89,13 +90,56 @@ MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")  # MinIO ignores this, but
 DOMAIN_NAME = os.getenv("DOMAIN_NAME", "http://localhost:8000")  # For local development
 
 # Initialize S3 client for MinIO
-s3_client = boto3.client(
-    's3',
-    endpoint_url=MINIO_ENDPOINT_URL,
-    aws_access_key_id=MINIO_ACCESS_KEY_ID,
-    aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
-    region_name=MINIO_REGION
-)
+# Configure SSL verification (set MINIO_VERIFY_SSL=false for self-signed certs)
+verify_ssl = os.getenv("MINIO_VERIFY_SSL", "true").lower() == "true"
+
+# If SSL verification is disabled, configure boto3 to skip certificate verification
+if not verify_ssl:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    # Create a custom session with SSL verification disabled
+    import botocore.session
+    from botocore.config import Config
+    from botocore.httpsession import URLLib3Session
+    
+    class NoVerifyHTTPSession(URLLib3Session):
+        def __init__(self, *args, **kwargs):
+            kwargs['verify'] = False
+            super().__init__(*args, **kwargs)
+    
+    # Use session with custom HTTPSession that doesn't verify SSL
+    session = botocore.session.Session()
+    session.set_component('session', NoVerifyHTTPSession)
+    
+    s3_config = Config(
+        signature_version='s3v4',
+        retries={'max_attempts': 3, 'mode': 'standard'}
+    )
+    
+    s3_client = session.create_client(
+        's3',
+        endpoint_url=MINIO_ENDPOINT_URL,
+        aws_access_key_id=MINIO_ACCESS_KEY_ID,
+        aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
+        region_name=MINIO_REGION,
+        config=s3_config
+    )
+else:
+    # Create boto3 config for normal SSL verification
+    s3_config = Config(
+        signature_version='s3v4',
+        retries={'max_attempts': 3, 'mode': 'standard'}
+    )
+    
+    # Initialize S3 client - boto3 automatically uses SSL if URL starts with https://
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=MINIO_ENDPOINT_URL,
+        aws_access_key_id=MINIO_ACCESS_KEY_ID,
+        aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
+        region_name=MINIO_REGION,
+        config=s3_config
+    )
 
 # Helper functions
 def get_mountain_time() -> datetime:
@@ -3793,8 +3837,13 @@ async def upload_image(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Upload an image to Garage S3 storage"""
+    """Upload an image to MinIO S3 storage"""
+    import traceback
     try:
+        print(f"📤 Starting image upload for user {current_user.username}")
+        print(f"🔗 MinIO Endpoint: {MINIO_ENDPOINT_URL}")
+        print(f"📦 Bucket: {MINIO_BUCKET_NAME}")
+        
         # Validate file type
         if not file.content_type or not file.content_type.startswith('image/'):
             raise HTTPException(
@@ -3804,6 +3853,7 @@ async def upload_image(
         
         # Validate file size (max 10MB)
         file_content = await file.read()
+        print(f"📏 File size: {len(file_content)} bytes")
         if len(file_content) > 10 * 1024 * 1024:  # 10MB
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -3814,19 +3864,41 @@ async def upload_image(
         file_extension = Path(file.filename).suffix if file.filename else '.jpg'
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         s3_key = f"images/{current_user.id}/{unique_filename}"
+        print(f"🔑 S3 Key: {s3_key}")
         
-        # Upload to Garage S3
-        s3_client.put_object(
-            Bucket=MINIO_BUCKET_NAME,
-            Key=s3_key,
-            Body=file_content,
-            ContentType=file.content_type,
-            Metadata={
-                'uploaded_by': current_user.username,
-                'uploaded_at': datetime.now().isoformat(),
-                'original_filename': file.filename or 'unknown'
-            }
-        )
+        # Test connection first
+        try:
+            print("🔍 Testing MinIO connection...")
+            s3_client.head_bucket(Bucket=MINIO_BUCKET_NAME)
+            print("✅ Bucket access confirmed")
+        except Exception as conn_error:
+            print(f"❌ Connection test failed: {conn_error}")
+            print(traceback.format_exc())
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Cannot connect to MinIO: {str(conn_error)}"
+            )
+        
+        # Upload to MinIO S3
+        # MinIO is strict about signed headers - start with minimal headers
+        print("⬆️ Uploading to MinIO...")
+        put_params = {
+            'Bucket': MINIO_BUCKET_NAME,
+            'Key': s3_key,
+            'Body': file_content,
+            'ContentType': file.content_type
+        }
+        
+        # Only add metadata if needed (can cause signature issues with some MinIO configs)
+        # Uncomment below if you need metadata:
+        # put_params['Metadata'] = {
+        #     'uploaded-by': current_user.username,
+        #     'uploaded-at': datetime.now().isoformat(),
+        #     'original-filename': file.filename or 'unknown'
+        # }
+        
+        s3_client.put_object(**put_params)
+        print("✅ Upload successful")
         
         # Generate proxy URL (served through FastAPI backend)
         image_url = f"{DOMAIN_NAME}/image-proxy/{s3_key}"
@@ -3840,11 +3912,40 @@ async def upload_image(
         )
         
     except ClientError as e:
+        error_code = 'Unknown'
+        error_message = str(e)
+        try:
+            if hasattr(e, 'response') and e.response:
+                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                error_message = e.response.get('Error', {}).get('Message', str(e))
+        except:
+            pass
+        
+        error_details = {
+            'error_code': error_code,
+            'error_message': error_message,
+            'endpoint': MINIO_ENDPOINT_URL,
+            'bucket': MINIO_BUCKET_NAME
+        }
+        print(f"❌ MinIO ClientError during upload:")
+        print(f"   Error Code: {error_code}")
+        print(f"   Error Message: {error_message}")
+        print(f"   Endpoint: {MINIO_ENDPOINT_URL}")
+        print(f"   Bucket: {MINIO_BUCKET_NAME}")
+        print(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload image: {str(e)}"
+            detail=f"Failed to upload image: {error_message} (Code: {error_code})"
         )
+    except HTTPException:
+        # Re-raise HTTP exceptions (like validation errors)
+        raise
     except Exception as e:
+        print(f"❌ Unexpected error during image upload:")
+        print(f"   Error Type: {type(e).__name__}")
+        print(f"   Error Message: {str(e)}")
+        print(f"   Endpoint: {MINIO_ENDPOINT_URL}")
+        print(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
