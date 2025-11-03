@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File, Header, Cookie, Query
+from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File, Header, Cookie, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict
 import uvicorn
@@ -132,14 +133,14 @@ else:
     )
     
     # Initialize S3 client - boto3 automatically uses SSL if URL starts with https://
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=MINIO_ENDPOINT_URL,
-        aws_access_key_id=MINIO_ACCESS_KEY_ID,
-        aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
+s3_client = boto3.client(
+    's3',
+    endpoint_url=MINIO_ENDPOINT_URL,
+    aws_access_key_id=MINIO_ACCESS_KEY_ID,
+    aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
         region_name=MINIO_REGION,
         config=s3_config
-    )
+)
 
 # Helper functions
 def get_mountain_time() -> datetime:
@@ -195,6 +196,15 @@ app = FastAPI(
     docs_url="/docs",  # Swagger UI
     redoc_url="/redoc",  # ReDoc
     lifespan=lifespan
+)
+
+# Add CORS middleware to allow requests from frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount static files for frontend
@@ -2059,6 +2069,183 @@ async def delete_yard_sale(
     
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
 
+# Featured Image Management Models
+class SetFeaturedImageRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Full image URL to set as featured")
+    image_key: Optional[str] = Field(None, description="Image key (e.g., 'images/user_id/filename.jpg') to set as featured")
+    photo_index: Optional[int] = Field(None, description="Index in the photos array to set as featured")
+
+class FeaturedImageResponse(BaseModel):
+    success: bool
+    message: str
+    featured_image: Optional[str] = None
+
+@app.put("/yard-sales/{yard_sale_id}/featured-image", response_model=FeaturedImageResponse)
+async def set_featured_image(
+    yard_sale_id: str,
+    request: Request,
+    featured_request: SetFeaturedImageRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Set the featured image for a yard sale (owner only)"""
+    yard_sale = db.query(YardSale).filter(
+        YardSale.id == yard_sale_id,
+        YardSale.owner_id == current_user.id
+    ).first()
+    
+    if not yard_sale:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Yard sale not found or you don't have permission"
+        )
+    
+    featured_image_url = None
+    
+    # Determine base URL for image URLs
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    origin = request.headers.get("Origin")
+    
+    if forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+    elif origin:
+        base_url = origin.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+    
+    # Method 1: Use provided image_url directly
+    if featured_request.image_url:
+        featured_image_url = featured_request.image_url
+    
+    # Method 2: Use image_key to generate URL
+    elif featured_request.image_key:
+        featured_image_url = f"{base_url}/image-proxy/{featured_request.image_key}"
+    
+    # Method 3: Use photo_index to get from photos array
+    elif featured_request.photo_index is not None:
+        if yard_sale.photos and isinstance(yard_sale.photos, list):
+            if 0 <= featured_request.photo_index < len(yard_sale.photos):
+                featured_image_url = yard_sale.photos[featured_request.photo_index]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Photo index {featured_request.photo_index} is out of range. Yard sale has {len(yard_sale.photos)} photos."
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Yard sale has no photos to select from"
+            )
+    
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either image_url, image_key, or photo_index"
+        )
+    
+    # Update the featured image
+    yard_sale.featured_image = featured_image_url
+    yard_sale.updated_at = get_mountain_time()
+    db.commit()
+    db.refresh(yard_sale)
+    
+    return FeaturedImageResponse(
+        success=True,
+        message="Featured image set successfully",
+        featured_image=featured_image_url
+    )
+
+@app.delete("/yard-sales/{yard_sale_id}/featured-image", response_model=FeaturedImageResponse)
+async def remove_featured_image(
+    yard_sale_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Remove the featured image from a yard sale (owner only)"""
+    yard_sale = db.query(YardSale).filter(
+        YardSale.id == yard_sale_id,
+        YardSale.owner_id == current_user.id
+    ).first()
+    
+    if not yard_sale:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Yard sale not found or you don't have permission"
+        )
+    
+    yard_sale.featured_image = None
+    yard_sale.updated_at = get_mountain_time()
+    db.commit()
+    
+    return FeaturedImageResponse(
+        success=True,
+        message="Featured image removed successfully",
+        featured_image=None
+    )
+
+@app.get("/yard-sales/{yard_sale_id}/images", response_model=dict)
+async def get_yard_sale_images(
+    yard_sale_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all available images for a yard sale (photos + user's uploaded images)"""
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    
+    if not yard_sale:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Yard sale not found"
+        )
+    
+    # Determine base URL for image URLs
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    origin = request.headers.get("Origin")
+    
+    if forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+    elif origin:
+        base_url = origin.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+    
+    # Get photos from yard sale
+    photos = yard_sale.photos if yard_sale.photos else []
+    
+    # Get user's uploaded images from MinIO (if owner)
+    uploaded_images = []
+    if yard_sale.owner_id == current_user.id:
+        try:
+            prefix = f"images/{current_user.id}/"
+            response = s3_client.list_objects_v2(
+                Bucket=MINIO_BUCKET_NAME,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    image_url = f"{base_url}/image-proxy/{obj['Key']}"
+                    uploaded_images.append({
+                        'key': obj['Key'],
+                        'url': image_url,
+                        'size': obj['Size'],
+                        'last_modified': obj['LastModified'].isoformat(),
+                        'filename': obj['Key'].split('/')[-1]
+                    })
+        except Exception as e:
+            print(f"Error fetching uploaded images: {e}")
+    
+    return {
+        "yard_sale_id": yard_sale_id,
+        "featured_image": yard_sale.featured_image,
+        "photos": photos,
+        "uploaded_images": uploaded_images,
+        "all_images": photos + [img['url'] for img in uploaded_images]
+    }
+
 @app.get("/yard-sales/search/nearby", response_model=List[YardSaleResponse])
 async def search_nearby_yard_sales(
     zip_code: str,
@@ -3833,6 +4020,7 @@ async def value_error_handler(request, exc):
 # Image Upload Endpoints
 @app.post("/upload/image", response_model=ImageUploadResponse)
 async def upload_image(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -3900,8 +4088,24 @@ async def upload_image(
         s3_client.put_object(**put_params)
         print("✅ Upload successful")
         
-        # Generate proxy URL (served through FastAPI backend)
-        image_url = f"{DOMAIN_NAME}/image-proxy/{s3_key}"
+        # Generate proxy URL using request origin (works for both localhost and IP access)
+        # Check for X-Forwarded-Host header (used by reverse proxies like Vite)
+        forwarded_host = request.headers.get("X-Forwarded-Host")
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+        origin = request.headers.get("Origin")
+        
+        if forwarded_host:
+            # Use forwarded host from proxy (e.g., from Vite dev server)
+            base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+        elif origin:
+            # Use Origin header (frontend's actual URL)
+            base_url = origin.rstrip('/')
+        else:
+            # Fallback to request.base_url
+            base_url = str(request.base_url).rstrip('/')
+        
+        image_url = f"{base_url}/image-proxy/{s3_key}"
+        print(f"🌐 Using base URL: {base_url} (from {forwarded_host or origin or 'request.base_url'})")
         
         return ImageUploadResponse(
             success=True,
@@ -3953,6 +4157,7 @@ async def upload_image(
 
 @app.get("/images", response_model=ImageListResponse)
 async def list_user_images(
+    request: Request,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -3965,10 +4170,26 @@ async def list_user_images(
             Prefix=prefix
         )
         
+        # Determine base URL for image URLs using request origin
+        # Check for X-Forwarded-Host header (used by reverse proxies like Vite)
+        forwarded_host = request.headers.get("X-Forwarded-Host")
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+        origin = request.headers.get("Origin")
+        
+        if forwarded_host:
+            # Use forwarded host from proxy (e.g., from Vite dev server)
+            base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+        elif origin:
+            # Use Origin header (frontend's actual URL)
+            base_url = origin.rstrip('/')
+        else:
+            # Fallback to request.base_url
+            base_url = str(request.base_url).rstrip('/')
+        
         images = []
         if 'Contents' in response:
             for obj in response['Contents']:
-                image_url = f"{DOMAIN_NAME}/image-proxy/{obj['Key']}"
+                image_url = f"{base_url}/image-proxy/{obj['Key']}"
                 images.append({
                     'key': obj['Key'],
                     'url': image_url,
