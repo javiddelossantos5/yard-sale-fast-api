@@ -427,6 +427,14 @@ class MarketItemMessageResponse(BaseModel):
     recipient_id: str
     recipient_username: str
 
+class MarketItemsPaginatedResponse(BaseModel):
+    """Paginated response for market items"""
+    items: List[MarketItemResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
 class MarketItemConversationResponse(BaseModel):
     id: str
     item_id: str
@@ -1256,22 +1264,27 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         **price_reduction
     )
 
-@app.get("/market-items", response_model=List[MarketItemResponse])
+@app.get("/market-items", response_model=MarketItemsPaginatedResponse)
 async def list_market_items(
-    skip: int = 0,
-    limit: int = 50,
-    name: Optional[str] = None,
+    search: Optional[str] = Query(None, description="Search term to match in name or description"),
     category: Optional[str] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$", alias="status"),
+    item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden|all)$", alias="status", description="Filter by status (active, sold, hidden, or all)"),
+    accepts_best_offer: Optional[bool] = Query(None, description="Filter items that accept best offers"),
+    price_reduced: Optional[bool] = Query(None, description="Filter items with reduced prices"),
+    sort_by: Optional[str] = Query(None, pattern="^(price|created_at|price_reduction_percentage|name)$", description="Sort field (price, created_at, price_reduction_percentage, name)"),
+    sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$", description="Sort order (asc or desc)"),
+    limit: int = Query(20, ge=1, le=100, description="Number of items per page"),
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db)
 ):
-    """Public listing of market items (excludes hidden)"""
+    """Public listing of market items with filtering, sorting, and pagination"""
     try:
         from sqlalchemy.orm import joinedload
         from sqlalchemy.exc import OperationalError, ProgrammingError
+        from sqlalchemy import or_, and_
         
         query = db.query(Item)
         
@@ -1282,39 +1295,135 @@ async def list_market_items(
             pass  # Column doesn't exist, skip filter
         
         try:
-            if item_status:
+            if item_status and item_status != "all":
                 query = query.filter(Item.status == item_status)
-            else:
+            elif not item_status:
+                # Default: exclude hidden items
                 query = query.filter(Item.status != "hidden")
+            # If status is "all", don't filter by status
         except (OperationalError, ProgrammingError, AttributeError):
             pass  # Column doesn't exist, skip filter
         
-        if name:
-            query = query.filter(Item.name.ilike(f"%{name}%"))
+        # Search filter: searches both name and description
+        if search:
+            try:
+                query = query.filter(
+                    or_(
+                        Item.name.ilike(f"%{search}%"),
+                        Item.description.ilike(f"%{search}%")
+                    )
+                )
+            except (OperationalError, ProgrammingError, AttributeError):
+                # Fallback to name only if description column doesn't exist
+                try:
+                    query = query.filter(Item.name.ilike(f"%{search}%"))
+                except Exception:
+                    pass
+        
+        # Category filter
         if category:
             query = query.filter(Item.category == category)
+        
+        # Price filters
         if min_price is not None:
             query = query.filter(Item.price >= min_price)
         if max_price is not None:
             query = query.filter(Item.price <= max_price)
         
-        # Eagerly load owner relationship to avoid lazy loading issues
-        # Wrap the actual query execution in try/except to catch DB errors
+        # Accepts best offer filter
+        if accepts_best_offer is not None:
+            try:
+                query = query.filter(Item.accepts_best_offer == accepts_best_offer)
+            except (OperationalError, ProgrammingError, AttributeError):
+                pass  # Column doesn't exist, skip filter
+        
+        # Price reduced filter
+        if price_reduced is not None:
+            try:
+                if price_reduced:
+                    # Filter items where price < original_price
+                    query = query.filter(
+                        and_(
+                            Item.original_price.isnot(None),
+                            Item.price < Item.original_price,
+                            Item.original_price > 0,
+                            Item.price > 0
+                        )
+                    )
+                else:
+                    # Filter items where price >= original_price or original_price is None
+                    query = query.filter(
+                        or_(
+                            Item.original_price.is_(None),
+                            Item.price >= Item.original_price
+                        )
+                    )
+            except (OperationalError, ProgrammingError, AttributeError):
+                pass  # Columns don't exist, skip filter
+        
+        # Get total count before pagination (for price_reduced filter calculation)
         try:
-            items = query.options(joinedload(Item.owner)).order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+            total_count = query.count()
+        except Exception as e:
+            print(f"Error counting items: {e}")
+            total_count = 0
+        
+        # Sorting
+        sort_field = sort_by or "created_at"
+        sort_direction = sort_order or "desc"
+        
+        try:
+            if sort_field == "price":
+                order_expr = Item.price.desc() if sort_direction == "desc" else Item.price.asc()
+            elif sort_field == "name":
+                order_expr = Item.name.asc() if sort_direction == "asc" else Item.name.desc()
+            elif sort_field == "price_reduction_percentage":
+                # Sort by price reduction percentage (calculated)
+                # This requires a subquery or raw SQL for accuracy, but we'll sort by (original_price - price) as proxy
+                try:
+                    if sort_direction == "desc":
+                        # Highest reduction first
+                        order_expr = (Item.original_price - Item.price).desc()
+                    else:
+                        order_expr = (Item.original_price - Item.price).asc()
+                except Exception:
+                    # Fallback to created_at if calculation fails
+                    order_expr = Item.created_at.desc()
+            else:  # created_at (default)
+                order_expr = Item.created_at.desc() if sort_direction == "desc" else Item.created_at.asc()
+            
+            query = query.order_by(order_expr)
+        except (OperationalError, ProgrammingError, AttributeError) as sort_error:
+            print(f"Sorting error, using default: {sort_error}")
+            # Fallback to default sorting
+            query = query.order_by(Item.created_at.desc())
+        
+        # Apply pagination
+        try:
+            items = query.options(joinedload(Item.owner)).offset(offset).limit(limit).all()
         except (OperationalError, ProgrammingError) as db_error:
             # If query fails due to missing columns, try a simpler query
             print(f"Query failed with columns, trying simpler query: {db_error}")
             query = db.query(Item)
-            if name:
-                query = query.filter(Item.name.ilike(f"%{name}%"))
+            if search:
+                try:
+                    query = query.filter(
+                        or_(
+                            Item.name.ilike(f"%{search}%"),
+                            Item.description.ilike(f"%{search}%")
+                        )
+                    )
+                except Exception:
+                    query = query.filter(Item.name.ilike(f"%{search}%"))
             if category:
                 query = query.filter(Item.category == category)
             if min_price is not None:
                 query = query.filter(Item.price >= min_price)
             if max_price is not None:
                 query = query.filter(Item.price <= max_price)
-            items = query.options(joinedload(Item.owner)).order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+            query = query.order_by(Item.created_at.desc())
+            total_count = query.count()
+            items = query.options(joinedload(Item.owner)).offset(offset).limit(limit).all()
         
         # Optional current user for is_watched
         current_user = None
@@ -1388,7 +1497,17 @@ async def list_market_items(
                 print(traceback.format_exc())
                 # Skip this item and continue
                 continue
-        return result
+        
+        # Calculate has_more
+        has_more = (offset + len(result)) < total_count
+        
+        return MarketItemsPaginatedResponse(
+            items=result,
+            total=total_count,
+            limit=limit,
+            offset=offset,
+            has_more=has_more
+        )
     except Exception as e:
         import traceback
         print(f"Error in list_market_items: {e}")
