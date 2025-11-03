@@ -432,6 +432,35 @@ class MarketItemConversationResponse(BaseModel):
     last_message: Optional[MarketItemMessageResponse] = None
     unread_count: int = 0
 
+# Yard Sale Messaging Models
+class YardSaleMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000, description="Message content")
+
+class YardSaleMessageResponse(BaseModel):
+    id: str
+    content: str
+    is_read: bool
+    created_at: datetime
+    sender_id: str
+    sender_username: str
+    recipient_id: str
+    recipient_username: str
+    yard_sale_id: str
+    conversation_id: str
+
+class YardSaleConversationResponse(BaseModel):
+    id: str
+    yard_sale_id: str
+    yard_sale_title: Optional[str] = None
+    participant1_id: str
+    participant1_username: Optional[str] = None
+    participant2_id: str
+    participant2_username: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_message: Optional[YardSaleMessageResponse] = None
+    unread_count: int = 0
+
 # Yard Sale Models
 class YardSaleCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Yard sale title")
@@ -1986,6 +2015,296 @@ async def get_yard_sales(
     
     return result
 
+# Yard Sale Messaging Endpoints (must be before /yard-sales/{yard_sale_id} route)
+@app.post("/yard-sales/{yard_sale_id}/messages", response_model=YardSaleMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_yard_sale_message(
+    yard_sale_id: str,
+    message: YardSaleMessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send initial message to a yard sale (creates a conversation)"""
+    # Get the yard sale
+    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    if not yard_sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Yard sale not found")
+    
+    # Check if yard sale allows messages
+    if not yard_sale.allow_messages:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This yard sale does not allow messages")
+    
+    # Determine recipient (seller is the yard sale owner)
+    seller_id = yard_sale.owner_id
+    recipient_id = seller_id
+    
+    # Can't message yourself
+    if current_user.id == recipient_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send message to yourself")
+    
+    # Find or create conversation
+    conversation = db.query(Conversation).filter(
+        Conversation.yard_sale_id == yard_sale_id,
+        ((Conversation.participant1_id == current_user.id) & (Conversation.participant2_id == recipient_id)) |
+        ((Conversation.participant1_id == recipient_id) & (Conversation.participant2_id == current_user.id))
+    ).first()
+    
+    if not conversation:
+        # Create new conversation (participant1 is the buyer/inquirer, participant2 is the seller)
+        if current_user.id == seller_id:
+            # Seller messaging someone (shouldn't happen normally, but handle it)
+            conversation = Conversation(
+                yard_sale_id=yard_sale_id,
+                participant1_id=recipient_id,
+                participant2_id=current_user.id
+            )
+        else:
+            # Buyer messaging seller
+            conversation = Conversation(
+                yard_sale_id=yard_sale_id,
+                participant1_id=current_user.id,
+                participant2_id=seller_id
+            )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+    
+    # Create message
+    db_message = Message(
+        content=message.content,
+        conversation_id=conversation.id,
+        sender_id=current_user.id,
+        recipient_id=recipient_id
+    )
+    db.add(db_message)
+    
+    # Update conversation updated_at
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(db_message)
+    
+    # Get usernames
+    recipient = db.query(User).filter(User.id == recipient_id).first()
+    
+    return YardSaleMessageResponse(
+        id=db_message.id,
+        content=db_message.content,
+        is_read=db_message.is_read,
+        created_at=db_message.created_at,
+        conversation_id=db_message.conversation_id,
+        sender_id=current_user.id,
+        sender_username=current_user.username,
+        recipient_id=recipient_id,
+        recipient_username=recipient.username if recipient else "unknown",
+        yard_sale_id=yard_sale_id
+    )
+
+@app.get("/yard-sales/conversations", response_model=List[YardSaleConversationResponse])
+async def get_yard_sale_conversations(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all yard sale conversations for the current authenticated user"""
+    # Get all conversations where user is a participant
+    conversations = db.query(Conversation).filter(
+        (Conversation.participant1_id == current_user.id) | 
+        (Conversation.participant2_id == current_user.id)
+    ).order_by(Conversation.updated_at.desc()).all()
+    
+    result: List[YardSaleConversationResponse] = []
+    for conv in conversations:
+        # Get yard sale info
+        yard_sale = db.query(YardSale).filter(YardSale.id == conv.yard_sale_id).first()
+        
+        # Get participant usernames
+        p1 = db.query(User).filter(User.id == conv.participant1_id).first()
+        p2 = db.query(User).filter(User.id == conv.participant2_id).first()
+        
+        # Get last message
+        last_msg = db.query(Message).filter(
+            Message.conversation_id == conv.id
+        ).order_by(Message.created_at.desc()).first()
+        
+        last_message_response = None
+        if last_msg:
+            sender = db.query(User).filter(User.id == last_msg.sender_id).first()
+            recipient = db.query(User).filter(User.id == last_msg.recipient_id).first()
+            # Handle None timestamp (fallback to current time)
+            last_msg_created_at = last_msg.created_at if last_msg.created_at else get_mountain_time()
+            last_message_response = YardSaleMessageResponse(
+                id=last_msg.id,
+                content=last_msg.content,
+                is_read=last_msg.is_read,
+                created_at=last_msg_created_at,
+                conversation_id=last_msg.conversation_id,
+                sender_id=last_msg.sender_id,
+                sender_username=sender.username if sender else "unknown",
+                recipient_id=last_msg.recipient_id,
+                recipient_username=recipient.username if recipient else "unknown",
+                yard_sale_id=conv.yard_sale_id
+            )
+        
+        # Count unread messages for current user
+        unread_count = db.query(Message).filter(
+            Message.conversation_id == conv.id,
+            Message.recipient_id == current_user.id,
+            Message.is_read == False
+        ).count()
+        
+        # Handle None timestamps (fallback to current time)
+        created_at = conv.created_at if conv.created_at else get_mountain_time()
+        updated_at = conv.updated_at if conv.updated_at else get_mountain_time()
+        
+        result.append(YardSaleConversationResponse(
+            id=conv.id,
+            yard_sale_id=conv.yard_sale_id,
+            yard_sale_title=yard_sale.title if yard_sale else None,
+            participant1_id=conv.participant1_id,
+            participant1_username=p1.username if p1 else None,
+            participant2_id=conv.participant2_id,
+            participant2_username=p2.username if p2 else None,
+            created_at=created_at,
+            updated_at=updated_at,
+            last_message=last_message_response,
+            unread_count=unread_count
+        ))
+    return result
+
+@app.get("/yard-sales/conversations/{conversation_id}/messages", response_model=List[YardSaleMessageResponse])
+async def get_yard_sale_conversation_messages(
+    conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a specific conversation"""
+    # Get conversation
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify user is a participant
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this conversation")
+    
+    # Get all messages
+    messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id
+    ).order_by(Message.created_at.asc()).all()
+    
+    result: List[YardSaleMessageResponse] = []
+    for msg in messages:
+        sender = db.query(User).filter(User.id == msg.sender_id).first()
+        recipient = db.query(User).filter(User.id == msg.recipient_id).first()
+        # Handle None timestamp (fallback to current time)
+        msg_created_at = msg.created_at if msg.created_at else get_mountain_time()
+        result.append(YardSaleMessageResponse(
+            id=msg.id,
+            content=msg.content,
+            is_read=msg.is_read,
+            created_at=msg_created_at,
+            conversation_id=msg.conversation_id,
+            sender_id=msg.sender_id,
+            sender_username=sender.username if sender else "unknown",
+            recipient_id=msg.recipient_id,
+            recipient_username=recipient.username if recipient else "unknown",
+            yard_sale_id=conversation.yard_sale_id
+        ))
+    return result
+
+@app.post("/yard-sales/conversations/{conversation_id}/messages", response_model=YardSaleMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_yard_sale_conversation_message(
+    conversation_id: str,
+    message: YardSaleMessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message in an existing conversation"""
+    # Get conversation
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify user is a participant
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to send messages in this conversation")
+    
+    # Determine recipient (the other participant)
+    recipient_id = conversation.participant2_id if current_user.id == conversation.participant1_id else conversation.participant1_id
+    
+    # Create message
+    db_message = Message(
+        content=message.content,
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        recipient_id=recipient_id
+    )
+    db.add(db_message)
+    
+    # Update conversation updated_at
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(db_message)
+    
+    # Get usernames
+    recipient = db.query(User).filter(User.id == recipient_id).first()
+    
+    return YardSaleMessageResponse(
+        id=db_message.id,
+        content=db_message.content,
+        is_read=db_message.is_read,
+        created_at=db_message.created_at,
+        conversation_id=db_message.conversation_id,
+        sender_id=current_user.id,
+        sender_username=current_user.username,
+        recipient_id=recipient_id,
+        recipient_username=recipient.username if recipient else "unknown",
+        yard_sale_id=conversation.yard_sale_id
+    )
+
+@app.put("/yard-sales/messages/{message_id}/read", status_code=status.HTTP_200_OK)
+async def mark_yard_sale_message_read(
+    message_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark a specific message as read"""
+    message = db.query(Message).filter(Message.id == message_id).first()
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    
+    # Only recipient can mark as read
+    if message.recipient_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to mark this message as read")
+    
+    message.is_read = True
+    db.commit()
+    
+    return {"success": True}
+
+@app.get("/yard-sales/messages/unread-count", response_model=dict)
+async def get_yard_sale_unread_count(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get total count of unread yard sale messages for current user"""
+    # Get conversations where user is a participant
+    conversations = db.query(Conversation).filter(
+        (Conversation.participant1_id == current_user.id) | 
+        (Conversation.participant2_id == current_user.id)
+    ).all()
+    
+    conversation_ids = [conv.id for conv in conversations]
+    
+    # Count unread messages in these conversations
+    unread_count = db.query(Message).filter(
+        Message.conversation_id.in_(conversation_ids),
+        Message.recipient_id == current_user.id,
+        Message.is_read == False
+    ).count() if conversation_ids else 0
+    
+    return {"unread_count": unread_count}
+
 @app.get("/yard-sales/{yard_sale_id}", response_model=YardSaleResponse)
 async def get_yard_sale(yard_sale_id: str, db: Session = Depends(get_db)):
     """Get a specific yard sale by ID"""
@@ -2351,118 +2670,6 @@ async def delete_comment(
 # ============================================================================
 # MESSAGE ENDPOINTS
 # ============================================================================
-
-# Send a message to yard sale owner
-@app.post("/yard-sales/{yard_sale_id}/messages", response_model=MessageResponse)
-async def send_message(
-    yard_sale_id: str,
-    message_data: MessageCreate,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Send a private message to the yard sale owner"""
-    # Check if yard sale exists
-    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
-    if not yard_sale:
-        raise HTTPException(status_code=404, detail="Yard sale not found")
-    
-    # Determine recipient - use provided recipient_id or default to yard sale owner
-    recipient_id = message_data.recipient_id if message_data.recipient_id else yard_sale.owner_id
-    recipient = db.query(User).filter(User.id == recipient_id).first()
-    if not recipient:
-        raise HTTPException(status_code=404, detail="Recipient not found")
-    
-    # Check if yard sale allows messages
-    if not yard_sale.allow_messages:
-        raise HTTPException(status_code=400, detail="This yard sale does not allow messages")
-    
-    # Get or create conversation between the two users
-    conversation = get_or_create_conversation(db, yard_sale_id, current_user.id, recipient_id)
-    
-    # Create the message
-    message = Message(
-        content=message_data.content,
-        conversation_id=conversation.id,
-        sender_id=current_user.id,
-        recipient_id=recipient_id
-    )
-    
-    db.add(message)
-    db.commit()
-    db.refresh(message)
-    
-    # Create notification for the recipient (only if not sending to self)
-    if recipient_id != current_user.id:
-        create_notification(
-            db=db,
-            user_id=recipient_id,
-            notification_type="message",
-            title=f"New message from {current_user.username}",
-            message=f"You received a message: \"{message_data.content[:100]}{'...' if len(message_data.content) > 100 else ''}\"",
-            related_user_id=current_user.id,
-            related_yard_sale_id=yard_sale_id,
-            related_message_id=message.id
-        )
-    
-    return MessageResponse(
-        id=message.id,
-        content=message.content,
-        is_read=message.is_read,
-        created_at=message.created_at,
-        conversation_id=message.conversation_id,
-        sender_id=message.sender_id,
-        sender_username=current_user.username,
-        recipient_id=message.recipient_id,
-        recipient_username=recipient.username
-    )
-
-# Get messages for a specific yard sale (conversation)
-@app.get("/yard-sales/{yard_sale_id}/messages", response_model=List[MessageResponse])
-async def get_yard_sale_messages(
-    yard_sale_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get all messages for a specific yard sale (only participants can see)"""
-    # Check if yard sale exists
-    yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
-    if not yard_sale:
-        raise HTTPException(status_code=404, detail="Yard sale not found")
-    
-    # Get conversations for this yard sale where current user is a participant
-    conversations = db.query(Conversation).filter(
-        Conversation.yard_sale_id == yard_sale_id,
-        (Conversation.participant1_id == current_user.id) | (Conversation.participant2_id == current_user.id)
-    ).all()
-    
-    if not conversations:
-        return []
-    
-    # Get all messages from these conversations
-    conversation_ids = [conv.id for conv in conversations]
-    messages = db.query(Message).filter(
-        Message.conversation_id.in_(conversation_ids)
-    ).order_by(Message.created_at.asc()).all()
-    
-    # Get sender and recipient usernames
-    result = []
-    for message in messages:
-        sender = db.query(User).filter(User.id == message.sender_id).first()
-        recipient = db.query(User).filter(User.id == message.recipient_id).first()
-        
-        result.append(MessageResponse(
-            id=message.id,
-            content=message.content,
-            is_read=message.is_read,
-            created_at=message.created_at,
-            conversation_id=message.conversation_id,
-            sender_id=message.sender_id,
-            sender_username=sender.username,
-            recipient_id=message.recipient_id,
-            recipient_username=recipient.username
-        ))
-    
-    return result
 
 # Get all conversations for current user
 @app.get("/conversations", response_model=List[ConversationResponse])
