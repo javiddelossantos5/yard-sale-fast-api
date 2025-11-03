@@ -996,7 +996,7 @@ async def health_check():
     }
 
 # Authentication endpoints
-@app.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/api/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
     
