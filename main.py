@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, model_validator
 from typing import List, Optional, Dict
 import uvicorn
 from datetime import datetime, timedelta
@@ -248,10 +248,18 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=72, description="Password (6-72 characters)")
+    password_confirm: str = Field(..., min_length=6, max_length=72, description="Confirm password (must match password)")
     full_name: Optional[str] = Field(None, max_length=100, description="Full name")
     location: Optional[Location] = None
     bio: Optional[str] = Field(None, max_length=1000, description="User bio")
     permissions: UserPermission = Field(UserPermission.USER, description="User permission level")
+    
+    @model_validator(mode='after')
+    def verify_password_match(self):
+        """Verify that password and password_confirm match"""
+        if self.password != self.password_confirm:
+            raise ValueError("Passwords do not match")
+        return self
 
 class UserResponse(UserBase):
     id: str
