@@ -435,6 +435,17 @@ class MarketItemsPaginatedResponse(BaseModel):
     offset: int
     has_more: bool
 
+# Featured Image Management Models (used by both yard sales and market items)
+class SetFeaturedImageRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Full image URL to set as featured")
+    image_key: Optional[str] = Field(None, description="Image key (e.g., 'images/user_id/filename.jpg') to set as featured")
+    photo_index: Optional[int] = Field(None, description="Index in the photos array to set as featured")
+
+class FeaturedImageResponse(BaseModel):
+    success: bool
+    message: str
+    featured_image: Optional[str] = None
+
 class MarketItemConversationResponse(BaseModel):
     id: str
     item_id: str
@@ -1827,6 +1838,171 @@ async def get_market_item_messages(
         ))
     return result
 
+# Market Item Featured Image Endpoints (must be before /market-items/{item_id} route)
+@app.put("/market-items/{item_id}/featured-image", response_model=FeaturedImageResponse)
+async def set_market_item_featured_image(
+    item_id: str,
+    request: Request,
+    featured_request: SetFeaturedImageRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Set the featured image for a market item (owner only)"""
+    item = db.query(Item).filter(
+        Item.id == item_id,
+        Item.owner_id == current_user.id
+    ).first()
+    
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Market item not found or you don't have permission"
+        )
+    
+    featured_image_url = None
+    
+    # Determine base URL for image URLs
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    origin = request.headers.get("Origin")
+    
+    if forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+    elif origin:
+        base_url = origin.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+    
+    # Method 1: Use provided image_url directly
+    if featured_request.image_url:
+        featured_image_url = featured_request.image_url
+    
+    # Method 2: Use image_key to generate URL
+    elif featured_request.image_key:
+        featured_image_url = f"{base_url}/image-proxy/{featured_request.image_key}"
+    
+    # Method 3: Use photo_index to get from photos array
+    elif featured_request.photo_index is not None:
+        if item.photos and isinstance(item.photos, list):
+            if 0 <= featured_request.photo_index < len(item.photos):
+                featured_image_url = item.photos[featured_request.photo_index]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Photo index {featured_request.photo_index} is out of range. Market item has {len(item.photos)} photos."
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Market item has no photos to select from"
+            )
+    
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either image_url, image_key, or photo_index"
+        )
+    
+    # Update the featured image
+    item.featured_image = featured_image_url
+    db.commit()
+    db.refresh(item)
+    
+    return FeaturedImageResponse(
+        success=True,
+        message="Featured image set successfully",
+        featured_image=featured_image_url
+    )
+
+@app.delete("/market-items/{item_id}/featured-image", response_model=FeaturedImageResponse)
+async def remove_market_item_featured_image(
+    item_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Remove the featured image from a market item (owner only)"""
+    item = db.query(Item).filter(
+        Item.id == item_id,
+        Item.owner_id == current_user.id
+    ).first()
+    
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Market item not found or you don't have permission"
+        )
+    
+    item.featured_image = None
+    db.commit()
+    
+    return FeaturedImageResponse(
+        success=True,
+        message="Featured image removed successfully",
+        featured_image=None
+    )
+
+@app.get("/market-items/{item_id}/images", response_model=dict)
+async def get_market_item_images(
+    item_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all available images for a market item (photos + user's uploaded images)"""
+    item = db.query(Item).filter(Item.id == item_id).first()
+    
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Market item not found"
+        )
+    
+    # Determine base URL for image URLs
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    origin = request.headers.get("Origin")
+    
+    if forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+    elif origin:
+        base_url = origin.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+    
+    # Get photos from market item
+    photos = item.photos if item.photos else []
+    
+    # Get user's uploaded images from MinIO (if owner)
+    uploaded_images = []
+    if item.owner_id == current_user.id:
+        try:
+            prefix = f"images/{current_user.id}/"
+            response = s3_client.list_objects_v2(
+                Bucket=MINIO_BUCKET_NAME,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    image_url = f"{base_url}/image-proxy/{obj['Key']}"
+                    uploaded_images.append({
+                        'key': obj['Key'],
+                        'url': image_url,
+                        'size': obj['Size'],
+                        'last_modified': obj['LastModified'].isoformat(),
+                        'filename': obj['Key'].split('/')[-1]
+                    })
+        except Exception as e:
+            print(f"Error fetching uploaded images: {e}")
+    
+    return {
+        "item_id": item_id,
+        "featured_image": item.featured_image,
+        "photos": photos,
+        "uploaded_images": uploaded_images,
+        "all_images": photos + [img['url'] for img in uploaded_images]
+    }
+
 @app.get("/market-items/{item_id}", response_model=MarketItemResponse)
 async def get_market_item(item_id: str, authorization: Optional[str] = Header(None, alias="Authorization"), db: Session = Depends(get_db)):
     """Get a single market item (must be public unless hidden)"""
@@ -2514,17 +2690,6 @@ async def delete_yard_sale(
     db.commit()
     
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
-
-# Featured Image Management Models
-class SetFeaturedImageRequest(BaseModel):
-    image_url: Optional[str] = Field(None, description="Full image URL to set as featured")
-    image_key: Optional[str] = Field(None, description="Image key (e.g., 'images/user_id/filename.jpg') to set as featured")
-    photo_index: Optional[int] = Field(None, description="Index in the photos array to set as featured")
-
-class FeaturedImageResponse(BaseModel):
-    success: bool
-    message: str
-    featured_image: Optional[str] = None
 
 @app.put("/yard-sales/{yard_sale_id}/featured-image", response_model=FeaturedImageResponse)
 async def set_featured_image(
