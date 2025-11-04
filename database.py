@@ -100,6 +100,10 @@ class Item(Base):
     original_price = Column(Float, nullable=True)  # Original price when item was created
     last_price_change_date = Column(DateTime, nullable=True)  # When price was last changed
     
+    # Item details
+    condition = Column(String(50), nullable=True)  # e.g., "new", "like new", "good", "fair", "poor"
+    quantity = Column(Integer, nullable=True)  # Number of items available (None means not specified/unlimited)
+    
     # Relationship with user
     owner = relationship("User", back_populates="items")
 

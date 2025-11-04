@@ -350,6 +350,8 @@ class MarketItemCreate(BaseModel):
     facebook_url: Optional[str] = Field(None, max_length=500)
     contact_phone: Optional[str] = Field(None, max_length=20, description="Seller's phone number for customer communication")
     contact_email: Optional[str] = Field(None, max_length=100, description="Seller's email for customer communication")
+    condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
+    quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
 
 class MarketItemUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -367,6 +369,8 @@ class MarketItemUpdate(BaseModel):
     facebook_url: Optional[str] = Field(None, max_length=500)
     contact_phone: Optional[str] = Field(None, max_length=20)
     contact_email: Optional[str] = Field(None, max_length=100)
+    condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
+    quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
 
 class MarketItemResponse(BaseModel):
     id: str
@@ -386,6 +390,8 @@ class MarketItemResponse(BaseModel):
     facebook_url: Optional[str]
     contact_phone: Optional[str]
     contact_email: Optional[str]
+    condition: Optional[str] = None
+    quantity: Optional[int] = None
     comment_count: int = 0
     created_at: datetime
     owner_id: str
@@ -1263,6 +1269,8 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         facebook_url=item.facebook_url,
         contact_phone=item.contact_phone,
         contact_email=item.contact_email,
+        condition=item.condition,
+        quantity=item.quantity,
         owner_id=current_user.id
     )
     db.add(db_item)
