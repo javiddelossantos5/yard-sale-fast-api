@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.dialects.mysql import CHAR
+import os
 from datetime import datetime
 import pytz
 import uuid
@@ -14,8 +15,12 @@ def get_mountain_time():
 # Database configuration
 # MySQL database running in Docker container
 # DATABASE_URL = "mysql+mysqlconnector://root:@127.0.0.1:3306/fastapi_db"
-DATABASE_URL = "mysql+mysqlconnector://root:supersecretpassword@127.0.0.1:3306/yardsale"
-
+# DATABASE_URL = "mysql+mysqlconnector://root:supersecretpassword@127.0.0.1:3306/yardsale"
+# Use environment variable if set, otherwise default to local connection
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "mysql+mysqlconnector://yardsaleuser:yardpass@127.0.0.1:3306/yardsale"
+)
 
 # Create engine
 engine = create_engine(DATABASE_URL, echo=True)
