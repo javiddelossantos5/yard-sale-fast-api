@@ -13,25 +13,31 @@ def setup_docker_database():
     try:
         print("🚀 Setting up database for Docker MySQL...")
         
-        # Connect to Docker MySQL (using the same credentials as docker-compose.yml)
+        # Connect to Docker MySQL (using root credentials from docker-compose.db.yml)
         connection = mysql.connector.connect(
             host='127.0.0.1',  # localhost since we're connecting from the host
             port=3306,
             user='root',
-            password='password'  # Password from docker-compose.yml
+            password='rootpassword'  # Root password from docker-compose.db.yml
         )
         
         if connection.is_connected():
             cursor = connection.cursor()
             
-            # Create database if it doesn't exist
-            print("📁 Creating database 'fastapi_db'...")
-            cursor.execute("CREATE DATABASE IF NOT EXISTS fastapi_db")
-            print("✅ Database 'fastapi_db' created successfully or already exists")
+            # Database already exists from docker-compose.db.yml, just verify
+            print("📁 Verifying database 'yardsale' exists...")
+            cursor.execute("SHOW DATABASES LIKE 'yardsale'")
+            result = cursor.fetchone()
+            if result:
+                print("✅ Database 'yardsale' exists")
+            else:
+                print("⚠️  Database 'yardsale' not found, creating...")
+                cursor.execute("CREATE DATABASE IF NOT EXISTS yardsale")
+                print("✅ Database 'yardsale' created")
             
             # Use the database
-            cursor.execute("USE fastapi_db")
-            print("✅ Using database 'fastapi_db'")
+            cursor.execute("USE yardsale")
+            print("✅ Using database 'yardsale'")
             
             # Create tables using the database.py models
             print("📋 Creating database tables...")
@@ -62,7 +68,7 @@ def setup_docker_database():
         print("\n🔧 Troubleshooting:")
         print("1. Make sure Docker MySQL is running: docker-compose ps")
         print("2. Check if MySQL container is accessible on port 3306")
-        print("3. Verify the password 'password' matches docker-compose.yml")
+        print("3. Verify the root password 'rootpassword' matches docker-compose.db.yml")
         return False
         
     except ImportError as e:

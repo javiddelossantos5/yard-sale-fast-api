@@ -1,0 +1,34 @@
+services:
+
+  db:
+
+    image: mysql:8
+
+    container_name: yard-sale-db
+
+    restart: always
+
+    environment:
+
+      MYSQL_ROOT_PASSWORD: rootpassword
+
+      MYSQL_DATABASE: yardsale
+
+      MYSQL_USER: yardsaleuser
+
+      MYSQL_PASSWORD: yardpass
+
+    ports:
+
+      - 3306:3306 # expose to host
+
+    volumes:
+
+      - db_data:/var/lib/mysql
+
+volumes:
+
+  db_data:
+
+    name: yard-sale-db-data
+

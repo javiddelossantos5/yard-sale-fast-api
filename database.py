@@ -12,8 +12,9 @@ def get_mountain_time():
     return datetime.now(mountain_tz)
 
 # Database configuration
-# MySQL root user has empty password
-DATABASE_URL = "mysql+mysqlconnector://root:@127.0.0.1:3306/fastapi_db"
+# MySQL database running in Docker container
+# DATABASE_URL = "mysql+mysqlconnector://root:@127.0.0.1:3306/fastapi_db"
+DATABASE_URL = "mysql+mysqlconnector://yardsaleuser:yardpass@127.0.0.1:3306/yardsale"
 
 # Create engine
 engine = create_engine(DATABASE_URL, echo=True)
