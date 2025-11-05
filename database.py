@@ -13,8 +13,8 @@ def get_mountain_time():
 
 # Database configuration
 # MySQL database running in Docker container
-# DATABASE_URL = "mysql+mysqlconnector://root:@127.0.0.1:3306/fastapi_db"
-DATABASE_URL = "mysql+mysqlconnector://yardsaleuser:yardpass@127.0.0.1:3306/yardsale"
+DATABASE_URL = "mysql+mysqlconnector://root:@127.0.0.1:3306/fastapi_db"
+# DATABASE_URL = "mysql+mysqlconnector://yardsaleuser:yardpass@127.0.0.1:3306/yardsale"
 
 # Create engine
 engine = create_engine(DATABASE_URL, echo=True)

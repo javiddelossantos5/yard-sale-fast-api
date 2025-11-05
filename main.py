@@ -260,6 +260,21 @@ class UserCreate(UserBase):
         if self.password != self.password_confirm:
             raise ValueError("Passwords do not match")
         return self
+    
+    @model_validator(mode='after')
+    def verify_password_byte_length(self):
+        """Ensure password doesn't exceed 72 bytes (bcrypt limitation)"""
+        password_bytes = self.password.encode('utf-8')
+        if len(password_bytes) > 72:
+            # Truncate to 72 bytes
+            password_bytes = password_bytes[:72]
+            self.password = password_bytes.decode('utf-8', errors='ignore')
+            # Also truncate password_confirm to match
+            password_confirm_bytes = self.password_confirm.encode('utf-8')
+            if len(password_confirm_bytes) > 72:
+                password_confirm_bytes = password_confirm_bytes[:72]
+                self.password_confirm = password_confirm_bytes.decode('utf-8', errors='ignore')
+        return self
 
 class UserResponse(UserBase):
     id: str
@@ -950,17 +965,27 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """Hash a password"""
     # Ensure password is not longer than 72 bytes (bcrypt limitation)
+    # Convert to bytes to check actual byte length (not character length)
     password_bytes = password.encode('utf-8')
     if len(password_bytes) > 72:
-        password = password_bytes[:72].decode('utf-8', errors='ignore')
+        # Truncate to 72 bytes and decode back to string
+        password_bytes = password_bytes[:72]
+        password = password_bytes.decode('utf-8', errors='ignore')
     
+    # Passlib expects a string, but we need to ensure it won't exceed 72 bytes
+    # when passlib encodes it internally
     try:
         return pwd_context.hash(password)
-    except Exception as e:
-        # Fallback: truncate to 72 characters (not bytes) if still failing
-        if len(password) > 72:
-            password = password[:72]
-        return pwd_context.hash(password)
+    except ValueError as e:
+        # If passlib still complains about length, try one more truncation
+        if "72 bytes" in str(e).lower():
+            # Double-check byte length
+            final_bytes = password.encode('utf-8')
+            if len(final_bytes) > 72:
+                final_bytes = final_bytes[:72]
+                password = final_bytes.decode('utf-8', errors='ignore')
+            return pwd_context.hash(password)
+        raise
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """Create a JWT access token"""
