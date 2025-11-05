@@ -22,8 +22,16 @@ DATABASE_URL = os.getenv(
     "mysql+mysqlconnector://yardsaleuser:yardpass@127.0.0.1:3306/yardsale"
 )
 
-# Create engine
-engine = create_engine(DATABASE_URL, echo=True)
+# Create engine with connection pooling and retry logic
+engine = create_engine(
+    DATABASE_URL, 
+    echo=True,
+    pool_pre_ping=True,  # Verify connections before using them
+    pool_recycle=3600,   # Recycle connections after 1 hour
+    connect_args={
+        "connect_timeout": 10,  # 10 second connection timeout
+    }
+)
 
 # Create session
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

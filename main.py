@@ -184,7 +184,12 @@ async def lifespan(app: FastAPI):
         create_tables()
         print("✅ Database tables created successfully")
     except Exception as e:
-        print(f"❌ Error creating database tables: {e}")
+        print(f"⚠️  Warning: Could not create database tables: {e}")
+        print("   The application will start, but database operations may fail.")
+        print("   You can create tables manually later with: python setup_docker_database.py")
+        import traceback
+        traceback.print_exc()
+        # Don't crash - let the app start anyway
     yield
     # Shutdown (if needed)
 
