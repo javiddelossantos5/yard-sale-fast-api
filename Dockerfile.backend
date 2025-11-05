@@ -1,21 +1,17 @@
-# Use official Python 3.12 image
+# Dockerfile.backend
 FROM python:3.12-slim
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy only requirements first for caching
 COPY requirements.txt .
 
-# Install dependencies
+# Upgrade pip and install dependencies
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of your project
+# Copy the rest of your application
 COPY . .
 
-# Expose FastAPI port
-EXPOSE 8000
-
-# Run your FastAPI app
+# Default command to run FastAPI
 CMD ["python", "main.py"]
