@@ -204,11 +204,18 @@ app = FastAPI(
 )
 
 # Add CORS middleware to allow requests from frontend
+# Allow both the Svelte dev server and production frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=[
+        "http://localhost:5173",   # Svelte dev server localhost
+        "http://127.0.0.1:5173",   # Svelte dev server 127.0.0.1
+        "http://10.1.2.165:5173", # Svelte dev server on server IP
+        "http://localhost:3000",   # Alternative Svelte port
+        "http://10.1.2.165:3000",  # Alternative Svelte port on server
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
