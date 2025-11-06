@@ -5,18 +5,22 @@ This document describes all the admin endpoints available for managing the platf
 ## Authentication
 
 All admin endpoints require:
+
 - **Authorization Header**: `Bearer <token>`
 - **User Permissions**: User must have `permissions: "admin"`
 
 ## Admin Capabilities
 
 ### 1. Edit Any Item or Yard Sale
+
 Admins can now edit and delete ANY marketplace item or yard sale, not just their own.
 
 ### 2. View Dashboard Statistics
+
 Get overview statistics for the platform.
 
 ### 3. View All Items and Yard Sales
+
 View all items and yard sales including hidden/inactive ones.
 
 ---
@@ -30,11 +34,13 @@ View all items and yard sales including hidden/inactive ones.
 Get platform-wide statistics.
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 ```
 
 **Response:**
+
 ```json
 {
   "total_users": 150,
@@ -53,11 +59,12 @@ Authorization: Bearer <admin_token>
 ```
 
 **Frontend Example:**
+
 ```javascript
 const response = await fetch('http://10.1.2.165:8000/admin/dashboard/stats', {
   headers: {
-    'Authorization': `Bearer ${token}`
-  }
+    Authorization: `Bearer ${token}`,
+  },
 });
 const stats = await response.json();
 ```
@@ -71,16 +78,19 @@ const stats = await response.json();
 Get all marketplace items including hidden ones.
 
 **Query Parameters:**
+
 - `skip` (int, default: 0) - Pagination offset
 - `limit` (int, default: 100) - Items per page
 - `status` (string, optional) - Filter by status: "active", "sold", "hidden"
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 ```
 
 **Response:**
+
 ```json
 {
   "items": [
@@ -88,7 +98,7 @@ Authorization: Bearer <admin_token>
       "id": "uuid",
       "name": "Item Name",
       "description": "Item description",
-      "price": 50.00,
+      "price": 50.0,
       "is_free": false,
       "status": "active",
       "is_public": true,
@@ -108,21 +118,28 @@ Authorization: Bearer <admin_token>
 ```
 
 **Frontend Example:**
+
 ```javascript
 // Get all items
-const response = await fetch('http://10.1.2.165:8000/admin/items?limit=50&skip=0', {
-  headers: {
-    'Authorization': `Bearer ${token}`
+const response = await fetch(
+  'http://10.1.2.165:8000/admin/items?limit=50&skip=0',
+  {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   }
-});
+);
 const data = await response.json();
 
 // Get only hidden items
-const hiddenResponse = await fetch('http://10.1.2.165:8000/admin/items?status=hidden', {
-  headers: {
-    'Authorization': `Bearer ${token}`
+const hiddenResponse = await fetch(
+  'http://10.1.2.165:8000/admin/items?status=hidden',
+  {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   }
-});
+);
 ```
 
 ---
@@ -134,16 +151,19 @@ const hiddenResponse = await fetch('http://10.1.2.165:8000/admin/items?status=hi
 Get all yard sales including inactive ones.
 
 **Query Parameters:**
+
 - `skip` (int, default: 0) - Pagination offset
 - `limit` (int, default: 100) - Yard sales per page
 - `status` (string, optional) - Filter by status: "active", "closed", "on_break"
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 ```
 
 **Response:**
+
 ```json
 {
   "yard_sales": [
@@ -171,12 +191,16 @@ Authorization: Bearer <admin_token>
 ```
 
 **Frontend Example:**
+
 ```javascript
-const response = await fetch('http://10.1.2.165:8000/admin/yard-sales?limit=50', {
-  headers: {
-    'Authorization': `Bearer ${token}`
+const response = await fetch(
+  'http://10.1.2.165:8000/admin/yard-sales?limit=50',
+  {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   }
-});
+);
 const data = await response.json();
 ```
 
@@ -189,17 +213,19 @@ const data = await response.json();
 Admins can now edit ANY item, not just their own.
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 Content-Type: application/json
 ```
 
 **Request Body:**
+
 ```json
 {
   "name": "Updated Name",
   "description": "Updated description",
-  "price": 75.00,
+  "price": 75.0,
   "status": "active",
   "is_free": false,
   "category": "Electronics"
@@ -209,18 +235,19 @@ Content-Type: application/json
 **Response:** Returns updated `MarketItemResponse`
 
 **Frontend Example:**
+
 ```javascript
 const response = await fetch(`http://10.1.2.165:8000/market-items/${itemId}`, {
   method: 'PUT',
   headers: {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
   },
   body: JSON.stringify({
-    name: "Updated Name",
-    price: 75.00,
-    status: "active"
-  })
+    name: 'Updated Name',
+    price: 75.0,
+    status: 'active',
+  }),
 });
 const updatedItem = await response.json();
 ```
@@ -234,12 +261,14 @@ const updatedItem = await response.json();
 Admins can now edit ANY yard sale, not just their own.
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 Content-Type: application/json
 ```
 
 **Request Body:**
+
 ```json
 {
   "title": "Updated Title",
@@ -252,18 +281,22 @@ Content-Type: application/json
 **Response:** Returns updated `YardSaleResponse`
 
 **Frontend Example:**
+
 ```javascript
-const response = await fetch(`http://10.1.2.165:8000/yard-sales/${yardSaleId}`, {
-  method: 'PUT',
-  headers: {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    title: "Updated Title",
-    status: "active"
-  })
-});
+const response = await fetch(
+  `http://10.1.2.165:8000/yard-sales/${yardSaleId}`,
+  {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      title: 'Updated Title',
+      status: 'active',
+    }),
+  }
+);
 const updatedYardSale = await response.json();
 ```
 
@@ -276,6 +309,7 @@ const updatedYardSale = await response.json();
 Admins can now delete ANY item, not just their own.
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 ```
@@ -283,12 +317,13 @@ Authorization: Bearer <admin_token>
 **Response:** `204 No Content`
 
 **Frontend Example:**
+
 ```javascript
 const response = await fetch(`http://10.1.2.165:8000/market-items/${itemId}`, {
   method: 'DELETE',
   headers: {
-    'Authorization': `Bearer ${token}`
-  }
+    Authorization: `Bearer ${token}`,
+  },
 });
 if (response.ok) {
   console.log('Item deleted successfully');
@@ -304,6 +339,7 @@ if (response.ok) {
 Admins can now delete ANY yard sale, not just their own.
 
 **Headers:**
+
 ```
 Authorization: Bearer <admin_token>
 ```
@@ -311,13 +347,17 @@ Authorization: Bearer <admin_token>
 **Response:** `204 No Content`
 
 **Frontend Example:**
+
 ```javascript
-const response = await fetch(`http://10.1.2.165:8000/yard-sales/${yardSaleId}`, {
-  method: 'DELETE',
-  headers: {
-    'Authorization': `Bearer ${token}`
+const response = await fetch(
+  `http://10.1.2.165:8000/yard-sales/${yardSaleId}`,
+  {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   }
-});
+);
 if (response.ok) {
   console.log('Yard sale deleted successfully');
 }
@@ -332,15 +372,17 @@ if (response.ok) {
 Get all users with pagination.
 
 **Query Parameters:**
+
 - `skip` (int, default: 0)
 - `limit` (int, default: 100)
 
 **Frontend Example:**
+
 ```javascript
 const response = await fetch('http://10.1.2.165:8000/admin/users?limit=50', {
   headers: {
-    'Authorization': `Bearer ${token}`
-  }
+    Authorization: `Bearer ${token}`,
+  },
 });
 const users = await response.json();
 ```
@@ -368,11 +410,11 @@ if (isAdmin) {
 async function loadDashboardStats() {
   const response = await fetch('http://10.1.2.165:8000/admin/dashboard/stats', {
     headers: {
-      'Authorization': `Bearer ${token}`
-    }
+      Authorization: `Bearer ${token}`,
+    },
   });
   const stats = await response.json();
-  
+
   // Display stats
   console.log('Total Users:', stats.total_users);
   console.log('Total Items:', stats.total_items);
@@ -384,35 +426,41 @@ async function loadAllItems(status = null) {
   if (status) {
     url += `&status=${status}`;
   }
-  
+
   const response = await fetch(url, {
     headers: {
-      'Authorization': `Bearer ${token}`
-    }
+      Authorization: `Bearer ${token}`,
+    },
   });
   const data = await response.json();
   return data.items;
 }
 
 async function editItem(itemId, updates) {
-  const response = await fetch(`http://10.1.2.165:8000/market-items/${itemId}`, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(updates)
-  });
+  const response = await fetch(
+    `http://10.1.2.165:8000/market-items/${itemId}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updates),
+    }
+  );
   return await response.json();
 }
 
 async function deleteItem(itemId) {
-  const response = await fetch(`http://10.1.2.165:8000/market-items/${itemId}`, {
-    method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${token}`
+  const response = await fetch(
+    `http://10.1.2.165:8000/market-items/${itemId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     }
-  });
+  );
   return response.ok;
 }
 ```
@@ -427,8 +475,8 @@ let loading = true;
 onMount(async () => {
   const response = await fetch('http://10.1.2.165:8000/admin/items?limit=100', {
     headers: {
-      'Authorization': `Bearer ${token}`
-    }
+      Authorization: `Bearer ${token}`,
+    },
   });
   const data = await response.json();
   items = data.items;
@@ -444,7 +492,7 @@ async function handleDelete(itemId) {
   if (confirm('Are you sure you want to delete this item?')) {
     await deleteItem(itemId);
     // Refresh list
-    items = items.filter(item => item.id !== itemId);
+    items = items.filter((item) => item.id !== itemId);
   }
 }
 ```
@@ -456,10 +504,12 @@ async function handleDelete(itemId) {
 ### Backend Changes Made:
 
 1. **Modified Update Endpoints:**
+
    - `PUT /market-items/{item_id}` - Now allows admins to edit any item
    - `PUT /yard-sales/{yard_sale_id}` - Now allows admins to edit any yard sale
 
 2. **Modified Delete Endpoints:**
+
    - `DELETE /market-items/{item_id}` - Now allows admins to delete any item
    - `DELETE /yard-sales/{yard_sale_id}` - Now allows admins to delete any yard sale
 
@@ -502,6 +552,7 @@ curl -X PUT \
 ## Error Handling
 
 All endpoints return standard HTTP status codes:
+
 - `200 OK` - Success
 - `401 Unauthorized` - Invalid or missing token
 - `403 Forbidden` - User is not an admin
@@ -509,4 +560,3 @@ All endpoints return standard HTTP status codes:
 - `500 Internal Server Error` - Server error
 
 Check the response status and handle errors appropriately in your frontend.
-
