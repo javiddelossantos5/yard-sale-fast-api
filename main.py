@@ -111,7 +111,7 @@ if not verify_ssl and MINIO_ENDPOINT_URL.startswith('https://'):
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Initialize S3 client (works for both HTTP and HTTPS)
+# Initialize S3 client (works for both HTTP and HTTPS)`]
 s3_client = boto3.client(
     's3',
     endpoint_url=MINIO_ENDPOINT_URL,
@@ -183,11 +183,28 @@ app = FastAPI(
 )
 
 # Add CORS middleware to allow requests from frontend
-# For development: allow all origins (restrict specific origins in production)
+# Allow both development and production origins
+# Can be overridden with CORS_ORIGINS environment variable (comma-separated)
+cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+if cors_origins_env:
+    # Use environment variable if set
+    cors_origins = [origin.strip() for origin in cors_origins_env.split(",")]
+else:
+    # Default origins: development and production
+    cors_origins = [
+        "http://localhost:5173",           # Svelte dev server localhost
+        "http://127.0.0.1:5173",           # Svelte dev server 127.0.0.1
+        "http://10.1.2.165:5173",          # Svelte dev server on server IP
+        "http://localhost:3000",            # Alternative dev port
+        "http://10.1.2.165:3000",          # Alternative dev port on server
+        "https://yardsalefinders.com",      # Production domain
+        "https://main.yardsalefinders.com", # Production subdomain
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
-    allow_credentials=False,  # Must be False when using "*" for origins
+    allow_origins=cors_origins,
+    allow_credentials=True,  # Allow credentials for authenticated requests
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
