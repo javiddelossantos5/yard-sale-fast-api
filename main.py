@@ -96,52 +96,28 @@ DOMAIN_NAME = os.getenv("DOMAIN_NAME", "http://10.1.2.165:8000")  # For local de
 # Default to false for local HTTP endpoints
 verify_ssl = os.getenv("MINIO_VERIFY_SSL", "false").lower() == "true"
 
-# If SSL verification is disabled, configure boto3 to skip certificate verification
-if not verify_ssl:
+# Create boto3 config for S3 client
+s3_config = Config(
+    signature_version='s3v4',
+    retries={'max_attempts': 3, 'mode': 'standard'}
+)
+
+# Initialize S3 client for MinIO
+# boto3 automatically handles HTTP vs HTTPS based on the endpoint URL
+# For HTTP endpoints (like http://10.1.2.165:9001), no SSL is used
+# For HTTPS endpoints, SSL verification is based on verify_ssl setting
+if not verify_ssl and MINIO_ENDPOINT_URL.startswith('https://'):
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    # Create a custom session with SSL verification disabled
-    import botocore.session
-    from botocore.config import Config
-    from botocore.httpsession import URLLib3Session
-    
-    class NoVerifyHTTPSession(URLLib3Session):
-        def __init__(self, *args, **kwargs):
-            kwargs['verify'] = False
-            super().__init__(*args, **kwargs)
-    
-    # Use session with custom HTTPSession that doesn't verify SSL
-    session = botocore.session.Session()
-    session.set_component('session', NoVerifyHTTPSession)
-    
-    s3_config = Config(
-        signature_version='s3v4',
-        retries={'max_attempts': 3, 'mode': 'standard'}
-    )
-    
-    s3_client = session.create_client(
-        's3',
-        endpoint_url=MINIO_ENDPOINT_URL,
-        aws_access_key_id=MINIO_ACCESS_KEY_ID,
-        aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
-        region_name=MINIO_REGION,
-        config=s3_config
-    )
-else:
-    # Create boto3 config for normal SSL verification
-    s3_config = Config(
-        signature_version='s3v4',
-        retries={'max_attempts': 3, 'mode': 'standard'}
-    )
-    
-    # Initialize S3 client - boto3 automatically uses SSL if URL starts with https://
+
+# Initialize S3 client (works for both HTTP and HTTPS)
 s3_client = boto3.client(
     's3',
     endpoint_url=MINIO_ENDPOINT_URL,
     aws_access_key_id=MINIO_ACCESS_KEY_ID,
     aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
-        region_name=MINIO_REGION,
-        config=s3_config
+    region_name=MINIO_REGION,
+    config=s3_config
 )
 
 # Helper functions
@@ -206,19 +182,14 @@ app = FastAPI(
 )
 
 # Add CORS middleware to allow requests from frontend
-# Allow both the Svelte dev server and production frontend
+# For development: allow all origins (restrict specific origins in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",   # Svelte dev server localhost
-        "http://127.0.0.1:5173",   # Svelte dev server 127.0.0.1
-        "http://10.1.2.165:5173", # Svelte dev server on server IP
-        "http://localhost:3000",   # Alternative Svelte port
-        "http://10.1.2.165:3000",  # Alternative Svelte port on server
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=False,  # Must be False when using "*" for origins
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Mount static files for frontend
