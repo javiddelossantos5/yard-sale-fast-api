@@ -1348,14 +1348,34 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
     # Check if owner is admin
     owner_is_admin = current_user.permissions == "admin"
     
-    # Create dict without is_free to avoid duplicate keyword argument
-    item_dict = {k: v for k, v in db_item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
-    
+    # Build response manually to avoid duplicate keyword arguments
     return MarketItemResponse(
-        **item_dict,
+        id=str(db_item.id),
+        name=db_item.name,
+        description=db_item.description,
+        price=db_item.price,
+        is_available=db_item.is_available,
+        is_public=db_item.is_public,
+        status=db_item.status,
+        category=db_item.category,
+        photos=db_item.photos,
+        featured_image=db_item.featured_image,
+        price_range=db_item.price_range,
+        accepts_best_offer=db_item.accepts_best_offer,
+        payment_methods=db_item.payment_methods,
+        venmo_url=db_item.venmo_url,
+        facebook_url=db_item.facebook_url,
+        contact_phone=db_item.contact_phone,
+        contact_email=db_item.contact_email,
+        condition=db_item.condition,
+        quantity=db_item.quantity,
+        is_free=final_is_free,
+        comment_count=0,
+        created_at=db_item.created_at,
+        owner_id=str(db_item.owner_id),
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
-        is_free=final_is_free,
+        is_watched=None,
         **price_reduction
     )
 
@@ -2121,15 +2141,34 @@ async def get_market_item(item_id: str, authorization: Optional[str] = Header(No
         if not is_free and item.price == 0.0:
             is_free = True
         
-        # Create dict without is_free to avoid duplicate keyword argument
-        item_dict = {k: v for k, v in item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
-        
+        # Build response manually to avoid duplicate keyword arguments
+        # Extract all fields from item, excluding is_free which we'll pass explicitly
         return MarketItemResponse(
-            **item_dict,
-            owner_username=owner_username,
-            owner_is_admin=owner_is_admin,
+            id=str(item.id),
+            name=item.name,
+            description=item.description,
+            price=item.price,
+            is_available=item.is_available,
+            is_public=item.is_public,
+            status=item.status,
+            category=item.category,
+            photos=item.photos,
+            featured_image=item.featured_image,
+            price_range=item.price_range,
+            accepts_best_offer=item.accepts_best_offer,
+            payment_methods=item.payment_methods,
+            venmo_url=item.venmo_url,
+            facebook_url=item.facebook_url,
+            contact_phone=item.contact_phone,
+            contact_email=item.contact_email,
+            condition=item.condition,
+            quantity=item.quantity,
             is_free=is_free,
             comment_count=comment_count,
+            created_at=item.created_at,
+            owner_id=str(item.owner_id),
+            owner_username=owner_username,
+            owner_is_admin=owner_is_admin,
             is_watched=is_watched,
             **price_reduction
         )
@@ -2265,15 +2304,33 @@ async def get_watched_items(
         if not is_free and item.price == 0.0:
             is_free = True
         
-        # Create dict without is_free to avoid duplicate keyword argument
-        item_dict = {k: v for k, v in item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
-        
+        # Build response manually to avoid duplicate keyword arguments
         result.append(MarketItemResponse(
-            **item_dict,
-            owner_username=owner_username,
-            owner_is_admin=owner_is_admin,
+            id=str(item.id),
+            name=item.name,
+            description=item.description,
+            price=item.price,
+            is_available=item.is_available,
+            is_public=item.is_public,
+            status=item.status,
+            category=item.category,
+            photos=item.photos,
+            featured_image=item.featured_image,
+            price_range=item.price_range,
+            accepts_best_offer=item.accepts_best_offer,
+            payment_methods=item.payment_methods,
+            venmo_url=item.venmo_url,
+            facebook_url=item.facebook_url,
+            contact_phone=item.contact_phone,
+            contact_email=item.contact_email,
+            condition=item.condition,
+            quantity=item.quantity,
             is_free=is_free,
             comment_count=comment_count,
+            created_at=item.created_at,
+            owner_id=str(item.owner_id),
+            owner_username=owner_username,
+            owner_is_admin=owner_is_admin,
             is_watched=True,  # Always true since these are from watchlist
             **price_reduction
         ))
@@ -2328,14 +2385,34 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
     # Check if owner is admin
     owner_is_admin = current_user.permissions == "admin"
     
-    # Create dict without is_free to avoid duplicate keyword argument
-    item_dict = {k: v for k, v in item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
-    
+    # Build response manually to avoid duplicate keyword arguments
     return MarketItemResponse(
-        **item_dict,
+        id=str(item.id),
+        name=item.name,
+        description=item.description,
+        price=item.price,
+        is_available=item.is_available,
+        is_public=item.is_public,
+        status=item.status,
+        category=item.category,
+        photos=item.photos,
+        featured_image=item.featured_image,
+        price_range=item.price_range,
+        accepts_best_offer=item.accepts_best_offer,
+        payment_methods=item.payment_methods,
+        venmo_url=item.venmo_url,
+        facebook_url=item.facebook_url,
+        contact_phone=item.contact_phone,
+        contact_email=item.contact_email,
+        condition=item.condition,
+        quantity=item.quantity,
+        is_free=is_free,
+        comment_count=db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count(),
+        created_at=item.created_at,
+        owner_id=str(item.owner_id),
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
-        is_free=is_free,
+        is_watched=None,
         **price_reduction
     )
 
