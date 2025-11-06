@@ -2386,8 +2386,13 @@ async def get_watched_items(
 
 @app.put("/market-items/{item_id}", response_model=MarketItemResponse)
 async def update_market_item(item_id: str, update: MarketItemUpdate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Update a market item (owner only)"""
-    item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
+    """Update a market item (owner only, or admin can edit any item)"""
+    # Allow admins to edit any item, otherwise only owner can edit
+    if current_user.permissions == "admin":
+        item = db.query(Item).filter(Item.id == item_id).first()
+    else:
+        item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
+    
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     
@@ -2466,8 +2471,13 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
 
 @app.delete("/market-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_market_item(item_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """Delete a market item (owner only)"""
-    item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
+    """Delete a market item (owner only, or admin can delete any item)"""
+    # Allow admins to delete any item, otherwise only owner can delete
+    if current_user.permissions == "admin":
+        item = db.query(Item).filter(Item.id == item_id).first()
+    else:
+        item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()
+    
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     db.delete(item)
@@ -2918,11 +2928,15 @@ async def update_yard_sale(
     current_user: User = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
 ):
-    """Update a yard sale (only if owned by current user)"""
-    yard_sale = db.query(YardSale).filter(
-        YardSale.id == yard_sale_id, 
-        YardSale.owner_id == current_user.id
-    ).first()
+    """Update a yard sale (owner only, or admin can edit any yard sale)"""
+    # Allow admins to edit any yard sale, otherwise only owner can edit
+    if current_user.permissions == "admin":
+        yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    else:
+        yard_sale = db.query(YardSale).filter(
+            YardSale.id == yard_sale_id, 
+            YardSale.owner_id == current_user.id
+        ).first()
     
     if not yard_sale:
         raise HTTPException(
@@ -2961,11 +2975,15 @@ async def delete_yard_sale(
     current_user: User = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
 ):
-    """Delete a yard sale (only if owned by current user)"""
-    yard_sale = db.query(YardSale).filter(
-        YardSale.id == yard_sale_id, 
-        YardSale.owner_id == current_user.id
-    ).first()
+    """Delete a yard sale (owner only, or admin can delete any yard sale)"""
+    # Allow admins to delete any yard sale, otherwise only owner can delete
+    if current_user.permissions == "admin":
+        yard_sale = db.query(YardSale).filter(YardSale.id == yard_sale_id).first()
+    else:
+        yard_sale = db.query(YardSale).filter(
+            YardSale.id == yard_sale_id, 
+            YardSale.owner_id == current_user.id
+        ).first()
     
     if not yard_sale:
         raise HTTPException(
@@ -4773,6 +4791,158 @@ async def delete_user_admin(
     db.commit()
     
     return {"message": "User deleted successfully"}
+
+# Admin Dashboard Endpoints
+@app.get("/admin/dashboard/stats", response_model=dict)
+async def get_admin_dashboard_stats(
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get admin dashboard statistics"""
+    try:
+        total_users = db.query(User).count()
+        total_items = db.query(Item).count()
+        total_yard_sales = db.query(YardSale).count()
+        active_items = db.query(Item).filter(Item.status == "active", Item.is_public == True).count()
+        active_yard_sales = db.query(YardSale).filter(YardSale.is_active == True).count()
+        from sqlalchemy import or_
+        free_items = db.query(Item).filter(
+            or_(Item.is_free == True, Item.price == 0.0)
+        ).count()
+        admin_users = db.query(User).filter(User.permissions == "admin").count()
+        
+        # Recent activity (last 7 days)
+        from datetime import timedelta
+        seven_days_ago = get_mountain_time() - timedelta(days=7)
+        recent_items = db.query(Item).filter(Item.created_at >= seven_days_ago).count()
+        recent_yard_sales = db.query(YardSale).filter(YardSale.created_at >= seven_days_ago).count()
+        recent_users = db.query(User).filter(User.created_at >= seven_days_ago).count()
+        
+        return {
+            "total_users": total_users,
+            "total_items": total_items,
+            "total_yard_sales": total_yard_sales,
+            "active_items": active_items,
+            "active_yard_sales": active_yard_sales,
+            "free_items": free_items,
+            "admin_users": admin_users,
+            "recent_activity": {
+                "items_last_7_days": recent_items,
+                "yard_sales_last_7_days": recent_yard_sales,
+                "users_last_7_days": recent_users
+            }
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error getting dashboard stats: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/admin/items", response_model=dict)
+async def get_all_items_admin(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get all market items (admin only) - includes hidden items"""
+    try:
+        from sqlalchemy import or_
+        query = db.query(Item)
+        
+        if status:
+            query = query.filter(Item.status == status)
+        
+        total_count = query.count()
+        items = query.order_by(Item.created_at.desc()).offset(skip).limit(limit).all()
+        
+        result = []
+        for item in items:
+            owner = db.query(User).filter(User.id == item.owner_id).first()
+            comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
+            is_free = getattr(item, 'is_free', False) or item.price == 0.0
+            
+            result.append({
+                "id": str(item.id),
+                "name": item.name,
+                "description": item.description,
+                "price": item.price,
+                "is_free": is_free,
+                "status": item.status,
+                "is_public": item.is_public,
+                "category": item.category,
+                "owner_id": str(item.owner_id),
+                "owner_username": owner.username if owner else "unknown",
+                "owner_is_admin": owner.permissions == "admin" if owner else False,
+                "comment_count": comment_count,
+                "created_at": item.created_at.isoformat() if item.created_at else None
+            })
+        
+        return {
+            "items": result,
+            "total": total_count,
+            "limit": limit,
+            "offset": skip,
+            "has_more": (skip + len(result)) < total_count
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error getting admin items: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/admin/yard-sales", response_model=dict)
+async def get_all_yard_sales_admin(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get all yard sales (admin only) - includes inactive/hidden sales"""
+    try:
+        query = db.query(YardSale)
+        
+        if status:
+            query = query.filter(YardSale.status == status)
+        
+        total_count = query.count()
+        yard_sales = query.order_by(YardSale.created_at.desc()).offset(skip).limit(limit).all()
+        
+        result = []
+        for yard_sale in yard_sales:
+            owner = db.query(User).filter(User.id == yard_sale.owner_id).first()
+            comment_count = db.query(Comment).filter(Comment.yard_sale_id == yard_sale.id).count()
+            
+            result.append({
+                "id": str(yard_sale.id),
+                "title": yard_sale.title,
+                "description": yard_sale.description,
+                "city": yard_sale.city,
+                "state": yard_sale.state,
+                "status": yard_sale.status,
+                "is_active": yard_sale.is_active,
+                "owner_id": str(yard_sale.owner_id),
+                "owner_username": owner.username if owner else "unknown",
+                "owner_is_admin": owner.permissions == "admin" if owner else False,
+                "comment_count": comment_count,
+                "created_at": yard_sale.created_at.isoformat() if yard_sale.created_at else None,
+                "start_date": yard_sale.start_date.isoformat() if yard_sale.start_date else None
+            })
+        
+        return {
+            "yard_sales": result,
+            "total": total_count,
+            "limit": limit,
+            "offset": skip,
+            "has_more": (skip + len(result)) < total_count
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error getting admin yard sales: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.get("/admin/reports", response_model=List[dict])
 async def get_all_reports(
