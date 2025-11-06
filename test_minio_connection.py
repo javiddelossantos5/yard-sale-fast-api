@@ -9,7 +9,7 @@ import os
 
 # MinIO Configuration
 # Use environment variables if set, otherwise use defaults
-MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "https://s3image.yardsalefinders.com")
+MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "http://10.1.2.165:9001")
 MINIO_ACCESS_KEY_ID = os.getenv("MINIO_ACCESS_KEY_ID", "minioadmin")
 MINIO_SECRET_ACCESS_KEY = os.getenv("MINIO_SECRET_ACCESS_KEY", "minioadmin")
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "yardsale")
