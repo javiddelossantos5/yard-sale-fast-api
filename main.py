@@ -355,7 +355,8 @@ class ItemUpdate(BaseModel):
 class MarketItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    price: float = Field(..., gt=0)
+    price: float = Field(..., ge=0, description="Item price (0 for free items)")
+    is_free: bool = Field(False, description="Mark item as free (if True, price should be 0)")
     is_public: bool = True
     status: Optional[str] = Field("active", pattern="^(active|sold|hidden)$")
     category: Optional[str] = Field(None, max_length=100)
@@ -370,11 +371,23 @@ class MarketItemCreate(BaseModel):
     contact_email: Optional[str] = Field(None, max_length=100, description="Seller's email for customer communication")
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
     quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
+    
+    @model_validator(mode='after')
+    def validate_free_item(self):
+        """Ensure that if is_free is True, price is 0"""
+        if self.is_free and self.price != 0:
+            # If marked as free, set price to 0
+            self.price = 0.0
+        elif not self.is_free and self.price == 0:
+            # If price is 0, automatically mark as free
+            self.is_free = True
+        return self
 
 class MarketItemUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    price: Optional[float] = Field(None, gt=0)
+    price: Optional[float] = Field(None, ge=0, description="Item price (0 for free items)")
+    is_free: Optional[bool] = Field(None, description="Mark item as free (if True, price should be 0)")
     is_public: Optional[bool] = None
     status: Optional[str] = Field(None, pattern="^(active|sold|hidden)$")
     category: Optional[str] = Field(None, max_length=100)
@@ -389,6 +402,24 @@ class MarketItemUpdate(BaseModel):
     contact_email: Optional[str] = Field(None, max_length=100)
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
     quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
+    
+    @model_validator(mode='after')
+    def validate_free_item(self):
+        """Ensure that if is_free is True, price is 0"""
+        if self.is_free is not None and self.price is not None:
+            if self.is_free and self.price != 0:
+                # If marked as free, set price to 0
+                self.price = 0.0
+            elif not self.is_free and self.price == 0:
+                # If price is 0, automatically mark as free
+                self.is_free = True
+        elif self.is_free is True and self.price is None:
+            # If marking as free but price not provided, set to 0
+            self.price = 0.0
+        elif self.price == 0 and self.is_free is None:
+            # If price is 0, automatically mark as free
+            self.is_free = True
+        return self
 
 class MarketItemResponse(BaseModel):
     id: str
@@ -410,10 +441,12 @@ class MarketItemResponse(BaseModel):
     contact_email: Optional[str]
     condition: Optional[str] = None
     quantity: Optional[int] = None
+    is_free: bool = False  # Whether the item is free (price == 0 or is_free flag set)
     comment_count: int = 0
     created_at: datetime
     owner_id: str
     owner_username: str
+    owner_is_admin: bool = False  # Whether the owner has admin permissions
     is_watched: Optional[bool] = None
     # Price reduction tracking
     original_price: Optional[float] = None
@@ -609,6 +642,7 @@ class YardSaleResponse(BaseModel):
     updated_at: datetime
     owner_id: str
     owner_username: str
+    owner_is_admin: bool = False  # Whether the owner has admin permissions
     comment_count: int = 0
     is_visited: Optional[bool] = None
     visit_count: Optional[int] = None
@@ -1279,11 +1313,15 @@ async def get_payment_methods():
 @app.post("/market-items", response_model=MarketItemResponse, status_code=status.HTTP_201_CREATED)
 async def create_market_item(item: MarketItemCreate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Create a market item (public by default)"""
+    # Ensure price is 0 if is_free is True
+    final_price = 0.0 if item.is_free else item.price
+    final_is_free = item.is_free or (item.price == 0)
+    
     db_item = Item(
         name=item.name,
         description=item.description,
-        price=item.price,
-        original_price=item.price,  # Set original price on creation
+        price=final_price,
+        original_price=final_price,  # Set original price on creation
         is_available=True,
         is_public=item.is_public,
         status=item.status or "active",
@@ -1299,15 +1337,22 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         contact_email=item.contact_email,
         condition=item.condition,
         quantity=item.quantity,
+        is_free=final_is_free,
         owner_id=current_user.id
     )
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
     price_reduction = calculate_price_reduction_fields(db_item)
+    
+    # Check if owner is admin
+    owner_is_admin = current_user.permissions == "admin"
+    
     return MarketItemResponse(
         **db_item.__dict__,
         owner_username=current_user.username,
+        owner_is_admin=owner_is_admin,
+        is_free=final_is_free,
         **price_reduction
     )
 
@@ -1503,6 +1548,7 @@ async def list_market_items(
                 
                 # Ensure we have owner relationship loaded
                 owner_username = i.owner.username if i.owner else "unknown"
+                owner_is_admin = i.owner.permissions == "admin" if i.owner else False
                 
                 # Safely extract item fields, filtering out SQLAlchemy internal attributes
                 item_dict = {k: v for k, v in i.__dict__.items() if not k.startswith('_')}
@@ -1510,6 +1556,11 @@ async def list_market_items(
                 # Get price reduction fields safely
                 original_price = getattr(i, 'original_price', None)
                 last_price_change_date = getattr(i, 'last_price_change_date', None)
+                
+                # Get is_free from database or calculate from price
+                is_free = item_dict.get('is_free', False)
+                if not is_free and item_dict.get('price', 0.0) == 0.0:
+                    is_free = True
                 
                 result.append(MarketItemResponse(
                     id=item_dict.get('id', str(i.id)),
@@ -1529,9 +1580,13 @@ async def list_market_items(
                     facebook_url=item_dict.get('facebook_url'),
                     contact_phone=item_dict.get('contact_phone'),
                     contact_email=item_dict.get('contact_email'),
+                    condition=item_dict.get('condition'),
+                    quantity=item_dict.get('quantity'),
+                    is_free=is_free,
                     created_at=item_dict.get('created_at'),
                     owner_id=item_dict.get('owner_id', ''),
                     owner_username=owner_username,
+                    owner_is_admin=owner_is_admin,
                     comment_count=comment_count,
                     is_watched=(i.id in watched_ids) if current_user else None,
                     original_price=original_price,
@@ -2056,9 +2111,18 @@ async def get_market_item(item_id: str, authorization: Optional[str] = Header(No
                 is_watched = db.query(WatchedItem).filter(WatchedItem.user_id == current_user.id, WatchedItem.item_id == item.id).first() is not None
         price_reduction = calculate_price_reduction_fields(item)
         owner_username = item.owner.username if item.owner else "unknown"
+        owner_is_admin = item.owner.permissions == "admin" if item.owner else False
+        
+        # Get is_free from database or calculate from price
+        is_free = getattr(item, 'is_free', False)
+        if not is_free and item.price == 0.0:
+            is_free = True
+        
         return MarketItemResponse(
             **item.__dict__,
             owner_username=owner_username,
+            owner_is_admin=owner_is_admin,
+            is_free=is_free,
             comment_count=comment_count,
             is_watched=is_watched,
             **price_reduction
@@ -2187,9 +2251,19 @@ async def get_watched_items(
     for watched_item, item in watched_items_pairs:
         comment_count = db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count()
         price_reduction = calculate_price_reduction_fields(item)
+        owner_username = item.owner.username if item.owner else "unknown"
+        owner_is_admin = item.owner.permissions == "admin" if item.owner else False
+        
+        # Get is_free from database or calculate from price
+        is_free = getattr(item, 'is_free', False)
+        if not is_free and item.price == 0.0:
+            is_free = True
+        
         result.append(MarketItemResponse(
             **item.__dict__,
-            owner_username=item.owner.username,
+            owner_username=owner_username,
+            owner_is_admin=owner_is_admin,
+            is_free=is_free,
             comment_count=comment_count,
             is_watched=True,  # Always true since these are from watchlist
             **price_reduction
@@ -2207,6 +2281,19 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
     old_price = item.price
     update_data = update.dict(exclude_unset=True)
     
+    # Handle is_free and price synchronization
+    if "is_free" in update_data or "price" in update_data:
+        if update_data.get("is_free") is True:
+            # If marking as free, set price to 0
+            update_data["price"] = 0.0
+            update_data["is_free"] = True
+        elif "price" in update_data and update_data["price"] == 0.0:
+            # If price is 0, automatically mark as free
+            update_data["is_free"] = True
+        elif "price" in update_data and update_data["price"] > 0.0 and update_data.get("is_free") is False:
+            # If price > 0 and explicitly not free, update is_free
+            update_data["is_free"] = False
+    
     # If original_price is not set (legacy items), set it to current price before updating
     if item.original_price is None:
         item.original_price = old_price
@@ -2223,9 +2310,20 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
     db.commit()
     db.refresh(item)
     price_reduction = calculate_price_reduction_fields(item)
+    
+    # Get is_free from database or calculate from price
+    is_free = getattr(item, 'is_free', False)
+    if not is_free and item.price == 0.0:
+        is_free = True
+    
+    # Check if owner is admin
+    owner_is_admin = current_user.permissions == "admin"
+    
     return MarketItemResponse(
         **item.__dict__,
         owner_username=current_user.username,
+        owner_is_admin=owner_is_admin,
+        is_free=is_free,
         **price_reduction
     )
 
@@ -2278,9 +2376,13 @@ async def create_yard_sale(yard_sale: YardSaleCreate, current_user: User = Depen
     # Get comment count
     comment_count = db.query(Comment).filter(Comment.yard_sale_id == db_yard_sale.id).count()
     
+    # Check if owner is admin
+    owner_is_admin = current_user.permissions == "admin"
+    
     return YardSaleResponse(
         **db_yard_sale.__dict__,
         owner_username=current_user.username,
+        owner_is_admin=owner_is_admin,
         comment_count=comment_count
     )
 
@@ -2343,9 +2445,13 @@ async def get_yard_sales(
             else:
                 is_visited = False
         
+        # Check if owner is admin
+        owner_is_admin = yard_sale.owner.permissions == "admin" if yard_sale.owner else False
+        
         result.append(YardSaleResponse(
             **yard_sale.__dict__,
-            owner_username=yard_sale.owner.username,
+            owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
+            owner_is_admin=owner_is_admin,
             comment_count=comment_count,
             is_visited=is_visited,
             visit_count=visit_count,
@@ -2658,9 +2764,13 @@ async def get_yard_sale(yard_sale_id: str, db: Session = Depends(get_db)):
     # Get comment count
     comment_count = db.query(Comment).filter(Comment.yard_sale_id == yard_sale.id).count()
     
+    # Check if owner is admin
+    owner_is_admin = yard_sale.owner.permissions == "admin" if yard_sale.owner else False
+    
     return YardSaleResponse(
         **yard_sale.__dict__,
-        owner_username=yard_sale.owner.username,
+        owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
+        owner_is_admin=owner_is_admin,
         comment_count=comment_count
     )
 
@@ -2698,9 +2808,13 @@ async def update_yard_sale(
     # Get comment count
     comment_count = db.query(Comment).filter(Comment.yard_sale_id == yard_sale.id).count()
     
+    # Check if owner is admin
+    owner_is_admin = yard_sale.owner.permissions == "admin" if yard_sale.owner else False
+    
     return YardSaleResponse(
         **yard_sale.__dict__,
-        owner_username=yard_sale.owner.username,
+        owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
+        owner_is_admin=owner_is_admin,
         comment_count=comment_count
     )
 
@@ -2915,9 +3029,12 @@ async def search_nearby_yard_sales(
     result = []
     for yard_sale in yard_sales:
         comment_count = db.query(Comment).filter(Comment.yard_sale_id == yard_sale.id).count()
+        # Check if owner is admin
+        owner_is_admin = yard_sale.owner.permissions == "admin" if yard_sale.owner else False
         result.append(YardSaleResponse(
             **yard_sale.__dict__,
-            owner_username=yard_sale.owner.username,
+            owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
+            owner_is_admin=owner_is_admin,
             comment_count=comment_count
         ))
     

@@ -118,6 +118,7 @@ class Item(Base):
     # Item details
     condition = Column(String(50), nullable=True)  # e.g., "new", "like new", "good", "fair", "poor"
     quantity = Column(Integer, nullable=True)  # Number of items available (None means not specified/unlimited)
+    is_free = Column(Boolean, default=False, nullable=False)  # Whether the item is free (price == 0)
     
     # Relationship with user
     owner = relationship("User", back_populates="items")
