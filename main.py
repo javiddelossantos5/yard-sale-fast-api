@@ -80,7 +80,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 180  # 3 hours
 
 # MinIO S3 Configuration
 # Use environment variables if set, otherwise use defaults
-MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "https://s3image.yardsalefinders.com")
+# MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "https://s3image.yardsalefinders.com")
+MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "http://10.1.2.165:9001")
 MINIO_ACCESS_KEY_ID = os.getenv("MINIO_ACCESS_KEY_ID", "minioadmin")
 MINIO_SECRET_ACCESS_KEY = os.getenv("MINIO_SECRET_ACCESS_KEY", "minioadmin")
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "yardsale")
@@ -88,11 +89,12 @@ MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")  # MinIO ignores this, but
 
 # Domain configuration for image URLs
 # For production, this should be your FastAPI backend domain
-DOMAIN_NAME = os.getenv("DOMAIN_NAME", "http://localhost:8000")  # For local development
+DOMAIN_NAME = os.getenv("DOMAIN_NAME", "http://10.1.2.165:8000")  # For local development
 
 # Initialize S3 client for MinIO
-# Configure SSL verification (set MINIO_VERIFY_SSL=false for self-signed certs)
-verify_ssl = os.getenv("MINIO_VERIFY_SSL", "true").lower() == "true"
+# Configure SSL verification (set MINIO_VERIFY_SSL=false for self-signed certs or HTTP)
+# Default to false for local HTTP endpoints
+verify_ssl = os.getenv("MINIO_VERIFY_SSL", "false").lower() == "true"
 
 # If SSL verification is disabled, configure boto3 to skip certificate verification
 if not verify_ssl:
