@@ -1,40 +1,36 @@
 #!/bin/bash
-# Script to add is_free column - tries multiple password options
+# Script to add is_free column to items table
+# Uses root password: supersecretpassword (from docker-compose)
 
-echo "🔍 Checking MySQL container environment..."
-docker exec yard-sale-db env | grep MYSQL
+echo "🚀 Adding is_free column to items table..."
 
-echo ""
-echo "🔍 Trying to connect with yardsaleuser account..."
-# Try with yardsaleuser account (from docker-compose.db.yml)
-docker exec -i yard-sale-db mysql -uyardsaleuser -pyardpass yardsale <<'EOF'
-ALTER TABLE items ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT FALSE NOT NULL;
-UPDATE items SET is_free = TRUE WHERE price = 0.0;
-SELECT 'Migration completed successfully!' AS result;
+# Try to add the column (ignore error if it already exists)
+echo "📋 Attempting to add is_free column..."
+docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'EOF' 2>/dev/null
+ALTER TABLE items ADD COLUMN is_free BOOLEAN DEFAULT FALSE NOT NULL;
 EOF
 
+# Check if the command succeeded or if column already exists
 if [ $? -eq 0 ]; then
-    echo "✅ Success! Column added using yardsaleuser account."
-    exit 0
+    echo "✅ Column 'is_free' added successfully"
+else
+    echo "ℹ️  Column may already exist (this is okay)"
 fi
 
-echo ""
-echo "⚠️  yardsaleuser failed, trying root with different passwords..."
-
-# Try root with supersecretpassword (from earlier messages)
+# Update existing items with price = 0 to have is_free = TRUE
+echo "🔄 Updating existing items with price 0.0..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'EOF'
-ALTER TABLE items ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT FALSE NOT NULL;
 UPDATE items SET is_free = TRUE WHERE price = 0.0;
-SELECT 'Migration completed successfully!' AS result;
+SELECT CONCAT('Updated ', ROW_COUNT(), ' items') AS result;
 EOF
 
 if [ $? -eq 0 ]; then
-    echo "✅ Success! Column added using root with tpassworsupersecred."
-    exit 0
+    echo "✅ Migration completed successfully!"
+    echo ""
+    echo "💡 You can verify by running:"
+    echo "   docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale -e \"DESCRIBE items;\""
+else
+    echo "❌ Error updating items. Please check the error above."
+    exit 1
 fi
-
-echo ""
-echo "❌ All attempts failed. Please check your MySQL password."
-echo "💡 You can check the password by running:"
-echo "   docker exec yard-sale-db env | grep MYSQL_ROOT_PASSWORD"
 
