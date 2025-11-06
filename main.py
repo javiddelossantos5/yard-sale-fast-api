@@ -1388,6 +1388,8 @@ async def list_market_items(
     item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden|all)$", alias="status", description="Filter by status (active, sold, hidden, or all)"),
     accepts_best_offer: Optional[bool] = Query(None, description="Filter items that accept best offers"),
     price_reduced: Optional[bool] = Query(None, description="Filter items with reduced prices"),
+    is_free: Optional[bool] = Query(None, description="Filter free items (true) or paid items (false)"),
+    owner_is_admin: Optional[bool] = Query(None, description="Filter items by admin owners (true) or non-admin owners (false)"),
     sort_by: Optional[str] = Query(None, pattern="^(price|created_at|price_reduction_percentage|name)$", description="Sort field (price, created_at, price_reduction_percentage, name)"),
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$", description="Sort order (asc or desc)"),
     limit: int = Query(20, ge=1, le=100, description="Number of items per page"),
@@ -1475,6 +1477,54 @@ async def list_market_items(
                     )
             except (OperationalError, ProgrammingError, AttributeError):
                 pass  # Columns don't exist, skip filter
+        
+        # is_free filter: filter items where is_free = true OR price = 0
+        if is_free is not None:
+            try:
+                if is_free:
+                    # Filter free items: is_free = true OR price = 0
+                    query = query.filter(
+                        or_(
+                            Item.is_free == True,
+                            Item.price == 0.0
+                        )
+                    )
+                else:
+                    # Filter paid items: is_free = false AND price > 0
+                    query = query.filter(
+                        and_(
+                            or_(Item.is_free == False, Item.is_free.is_(None)),
+                            Item.price > 0.0
+                        )
+                    )
+            except (OperationalError, ProgrammingError, AttributeError):
+                # If is_free column doesn't exist, fallback to price-based filtering
+                if is_free:
+                    query = query.filter(Item.price == 0.0)
+                else:
+                    query = query.filter(Item.price > 0.0)
+        
+        # owner_is_admin filter: filter items by owner's admin status
+        if owner_is_admin is not None:
+            try:
+                # Join with User table to filter by owner permissions
+                # Use distinct() to avoid duplicate rows if needed
+                from database import User
+                query = query.join(User, Item.owner_id == User.id)
+                
+                if owner_is_admin:
+                    # Filter items where owner has admin permissions
+                    query = query.filter(User.permissions == "admin")
+                else:
+                    # Filter items where owner does NOT have admin permissions
+                    query = query.filter(User.permissions != "admin")
+                
+                # Use distinct() to avoid duplicate items if join creates duplicates
+                query = query.distinct()
+            except (OperationalError, ProgrammingError, AttributeError) as e:
+                print(f"Error filtering by owner_is_admin: {e}")
+                # If join fails, skip this filter
+                pass
         
         # Get total count before pagination (for price_reduced filter calculation)
         try:
