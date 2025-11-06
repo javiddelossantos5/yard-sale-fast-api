@@ -365,27 +365,83 @@ if (response.ok) {
 
 ---
 
-### 8. Get All Users (Existing)
+### 8. Get All Users
 
 **GET** `/admin/users`
 
-Get all users with pagination.
+Get all users with pagination and search.
 
 **Query Parameters:**
 
-- `skip` (int, default: 0)
-- `limit` (int, default: 100)
+- `skip` (int, default: 0) - Pagination offset
+- `limit` (int, default: 100) - Users per page
+- `search` (string, optional) - Search by username, email, or full name
+
+**Headers:**
+
+```
+Authorization: Bearer <admin_token>
+```
+
+**Response:**
+
+```json
+{
+  "users": [
+    {
+      "id": "user-uuid",
+      "username": "username",
+      "email": "user@example.com",
+      "full_name": "Full Name",
+      "phone_number": "123-456-7890",
+      "city": "Vernal",
+      "state": "UT",
+      "zip_code": "84078",
+      "bio": "User bio",
+      "is_active": true,
+      "permissions": "admin",
+      "created_at": "2024-01-01T00:00:00",
+      "updated_at": "2024-01-01T00:00:00"
+    }
+  ],
+  "total": 150,
+  "limit": 100,
+  "offset": 0,
+  "has_more": true
+}
+```
 
 **Frontend Example:**
 
 ```javascript
+// Get all users
 const response = await fetch('http://10.1.2.165:8000/admin/users?limit=50', {
   headers: {
     Authorization: `Bearer ${token}`,
   },
 });
-const users = await response.json();
+const data = await response.json();
+const users = data.users; // Array of users
+const total = data.total; // Total count
+
+// Search users
+const searchResponse = await fetch(
+  'http://10.1.2.165:8000/admin/users?search=john&limit=20',
+  {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  }
+);
+const searchData = await searchResponse.json();
 ```
+
+**Important Notes:**
+
+- The endpoint is at `/admin/users` (NOT `/api/admin/users`)
+- Response includes pagination metadata
+- Use `data.users` to access the array of users
+- Search searches username, email, and full_name fields
 
 ---
 

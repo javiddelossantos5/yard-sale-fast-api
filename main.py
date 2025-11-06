@@ -4650,33 +4650,63 @@ async def delete_notification(
     return {"message": "Notification deleted"}
 
 # Admin-only endpoints
-@app.get("/admin/users", response_model=List[UserResponse])
+@app.get("/admin/users", response_model=dict)
 async def get_all_users(
     skip: int = 0,
     limit: int = 100,
+    search: Optional[str] = None,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
-    """Get all users (admin only)"""
-    users = db.query(User).offset(skip).limit(limit).all()
-    return [
-        UserResponse(
-            id=user.id,
-            username=user.username,
-            email=user.email,
-            full_name=user.full_name,
-            phone_number=user.phone_number,
-            city=user.city,
-            state=user.state,
-            zip_code=user.zip_code,
-            bio=user.bio,
-            is_active=user.is_active,
-            permissions=UserPermission(user.permissions),
-            created_at=user.created_at,
-            updated_at=user.updated_at
-        )
-        for user in users
-    ]
+    """Get all users (admin only) with pagination"""
+    try:
+        query = db.query(User)
+        
+        # Search filter (username or email)
+        if search:
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    User.username.ilike(f"%{search}%"),
+                    User.email.ilike(f"%{search}%"),
+                    User.full_name.ilike(f"%{search}%")
+                )
+            )
+        
+        total_count = query.count()
+        users = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
+        
+        result = [
+            UserResponse(
+                id=user.id,
+                username=user.username,
+                email=user.email,
+                full_name=user.full_name,
+                phone_number=user.phone_number,
+                city=user.city,
+                state=user.state,
+                zip_code=user.zip_code,
+                bio=user.bio,
+                is_active=user.is_active,
+                permissions=UserPermission(user.permissions),
+                created_at=user.created_at,
+                updated_at=user.updated_at
+            )
+            for user in users
+        ]
+        
+        return {
+            "users": result,
+            "total": total_count,
+            "limit": limit,
+            "offset": skip,
+            "has_more": (skip + len(result)) < total_count
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error getting admin users: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.get("/admin/users/{user_id}", response_model=UserResponse)
 async def get_user_by_id_admin(
