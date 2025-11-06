@@ -199,6 +199,7 @@ else:
         "http://10.1.2.165:3000",          # Alternative dev port on server
         "https://yardsalefinders.com",      # Production domain
         "https://main.yardsalefinders.com", # Production subdomain
+        "https://api.yardsalefinders.com",  # Backend API subdomain (if frontend needs to call it)
     ]
 
 app.add_middleware(
