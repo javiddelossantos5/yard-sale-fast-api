@@ -1573,44 +1573,42 @@ async def list_market_items(
                 owner_username = i.owner.username if i.owner else "unknown"
                 owner_is_admin = i.owner.permissions == "admin" if i.owner else False
                 
-                # Safely extract item fields, filtering out SQLAlchemy internal attributes
-                item_dict = {k: v for k, v in i.__dict__.items() if not k.startswith('_')}
-                
                 # Get price reduction fields safely
                 original_price = getattr(i, 'original_price', None)
                 last_price_change_date = getattr(i, 'last_price_change_date', None)
                 
                 # Get is_free from database or calculate from price
-                is_free = item_dict.get('is_free', False)
-                if not is_free and item_dict.get('price', 0.0) == 0.0:
+                is_free = getattr(i, 'is_free', False)
+                if not is_free and i.price == 0.0:
                     is_free = True
                 
+                # Build response manually to avoid duplicate keyword arguments
                 result.append(MarketItemResponse(
-                    id=item_dict.get('id', str(i.id)),
-                    name=item_dict.get('name', ''),
-                    description=item_dict.get('description'),
-                    price=item_dict.get('price', 0.0),
-                    is_available=item_dict.get('is_available', True),
-                    is_public=item_dict.get('is_public', True),
-                    status=item_dict.get('status', 'active'),
-                    category=item_dict.get('category'),
-                    photos=item_dict.get('photos'),
-                    featured_image=item_dict.get('featured_image'),
-                    price_range=item_dict.get('price_range'),
-                    accepts_best_offer=item_dict.get('accepts_best_offer', False),
-                    payment_methods=item_dict.get('payment_methods'),
-                    venmo_url=item_dict.get('venmo_url'),
-                    facebook_url=item_dict.get('facebook_url'),
-                    contact_phone=item_dict.get('contact_phone'),
-                    contact_email=item_dict.get('contact_email'),
-                    condition=item_dict.get('condition'),
-                    quantity=item_dict.get('quantity'),
+                    id=str(i.id),
+                    name=i.name,
+                    description=i.description,
+                    price=i.price,
+                    is_available=i.is_available,
+                    is_public=i.is_public,
+                    status=i.status,
+                    category=i.category,
+                    photos=i.photos,
+                    featured_image=i.featured_image,
+                    price_range=i.price_range,
+                    accepts_best_offer=i.accepts_best_offer,
+                    payment_methods=i.payment_methods,
+                    venmo_url=i.venmo_url,
+                    facebook_url=i.facebook_url,
+                    contact_phone=i.contact_phone,
+                    contact_email=i.contact_email,
+                    condition=i.condition,
+                    quantity=i.quantity,
                     is_free=is_free,
-                    created_at=item_dict.get('created_at'),
-                    owner_id=item_dict.get('owner_id', ''),
+                    comment_count=comment_count,
+                    created_at=i.created_at,
+                    owner_id=str(i.owner_id),
                     owner_username=owner_username,
                     owner_is_admin=owner_is_admin,
-                    comment_count=comment_count,
                     is_watched=(i.id in watched_ids) if current_user else None,
                     original_price=original_price,
                     last_price_change_date=last_price_change_date,
