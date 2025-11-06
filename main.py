@@ -1348,8 +1348,11 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
     # Check if owner is admin
     owner_is_admin = current_user.permissions == "admin"
     
+    # Create dict without is_free to avoid duplicate keyword argument
+    item_dict = {k: v for k, v in db_item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
+    
     return MarketItemResponse(
-        **db_item.__dict__,
+        **item_dict,
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
         is_free=final_is_free,
@@ -2118,8 +2121,11 @@ async def get_market_item(item_id: str, authorization: Optional[str] = Header(No
         if not is_free and item.price == 0.0:
             is_free = True
         
+        # Create dict without is_free to avoid duplicate keyword argument
+        item_dict = {k: v for k, v in item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
+        
         return MarketItemResponse(
-            **item.__dict__,
+            **item_dict,
             owner_username=owner_username,
             owner_is_admin=owner_is_admin,
             is_free=is_free,
@@ -2259,8 +2265,11 @@ async def get_watched_items(
         if not is_free and item.price == 0.0:
             is_free = True
         
+        # Create dict without is_free to avoid duplicate keyword argument
+        item_dict = {k: v for k, v in item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
+        
         result.append(MarketItemResponse(
-            **item.__dict__,
+            **item_dict,
             owner_username=owner_username,
             owner_is_admin=owner_is_admin,
             is_free=is_free,
@@ -2319,8 +2328,11 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
     # Check if owner is admin
     owner_is_admin = current_user.permissions == "admin"
     
+    # Create dict without is_free to avoid duplicate keyword argument
+    item_dict = {k: v for k, v in item.__dict__.items() if k != 'is_free' and not k.startswith('_')}
+    
     return MarketItemResponse(
-        **item.__dict__,
+        **item_dict,
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
         is_free=is_free,
