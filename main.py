@@ -19,6 +19,11 @@ from botocore.exceptions import ClientError
 from botocore.config import Config
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (if it exists)
+# This must be called before any os.getenv() calls
+load_dotenv()
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
 from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, get_mountain_time
 

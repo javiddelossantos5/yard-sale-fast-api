@@ -6,6 +6,10 @@ import os
 from datetime import datetime
 import pytz
 import uuid
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (if it exists)
+load_dotenv()
 
 def get_mountain_time():
     """Get current time in Mountain Time Zone (Vernal, Utah)"""
