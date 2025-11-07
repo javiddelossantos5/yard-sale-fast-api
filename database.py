@@ -116,6 +116,11 @@ class Item(Base):
     contact_phone = Column(String(20), nullable=True)  # Seller's phone number for this item
     contact_email = Column(String(100), nullable=True)  # Seller's email for this item
     
+    # Location information (optional)
+    city = Column(String(100), nullable=True)  # City where item is located
+    state = Column(String(2), nullable=True)  # State abbreviation (e.g., "UT", "CA")
+    zip_code = Column(String(10), nullable=True)  # ZIP code
+    
     # Price tracking for reductions
     original_price = Column(Float, nullable=True)  # Original price when item was created
     last_price_change_date = Column(DateTime, nullable=True)  # When price was last changed

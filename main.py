@@ -884,6 +884,9 @@ class MarketItemCreate(BaseModel):
     seller: Optional[str] = Field(None, max_length=100, description="Seller name/contact name (optional)")
     contact_phone: Optional[str] = Field(None, max_length=20, description="Seller's phone number for customer communication")
     contact_email: Optional[str] = Field(None, max_length=100, description="Seller's email for customer communication")
+    city: Optional[str] = Field(None, max_length=100, description="City where item is located (optional)")
+    state: Optional[str] = Field(None, max_length=2, description="State abbreviation (e.g., UT, CA) (optional)")
+    zip_code: Optional[str] = Field(None, max_length=10, description="ZIP code (optional)")
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
     quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
     miles: Optional[int] = Field(None, ge=0, description="Mileage for automotive items (optional)")
@@ -917,6 +920,9 @@ class MarketItemUpdate(BaseModel):
     seller: Optional[str] = Field(None, max_length=100, description="Seller name/contact name (optional)")
     contact_phone: Optional[str] = Field(None, max_length=20)
     contact_email: Optional[str] = Field(None, max_length=100)
+    city: Optional[str] = Field(None, max_length=100, description="City where item is located (optional)")
+    state: Optional[str] = Field(None, max_length=2, description="State abbreviation (e.g., UT, CA) (optional)")
+    zip_code: Optional[str] = Field(None, max_length=10, description="ZIP code (optional)")
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
     quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
     miles: Optional[int] = Field(None, ge=0, description="Mileage for automotive items (optional)")
@@ -958,6 +964,9 @@ class MarketItemResponse(BaseModel):
     seller: Optional[str] = None  # Seller name/contact name (optional)
     contact_phone: Optional[str]
     contact_email: Optional[str]
+    city: Optional[str] = None  # City where item is located (optional)
+    state: Optional[str] = None  # State abbreviation (optional)
+    zip_code: Optional[str] = None  # ZIP code (optional)
     condition: Optional[str] = None
     quantity: Optional[int] = None
     miles: Optional[int] = None  # Mileage for automotive items
@@ -1911,6 +1920,9 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         seller=item.seller,
         contact_phone=item.contact_phone,
         contact_email=item.contact_email,
+        city=item.city,
+        state=item.state,
+        zip_code=item.zip_code,
         condition=item.condition,
         quantity=item.quantity,
         miles=item.miles,
@@ -3017,7 +3029,7 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
     
     for field, value in update_data.items():
         # Handle empty strings for optional string fields (convert to None)
-        if field in ['seller', 'contact_phone', 'contact_email', 'description', 'category', 'condition'] and value == "":
+        if field in ['seller', 'contact_phone', 'contact_email', 'city', 'state', 'zip_code', 'description', 'category', 'condition'] and value == "":
             setattr(item, field, None)
         else:
             setattr(item, field, value)
@@ -3054,6 +3066,9 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
         seller=item.seller,
         contact_phone=item.contact_phone,
         contact_email=item.contact_email,
+        city=item.city,
+        state=item.state,
+        zip_code=item.zip_code,
         condition=item.condition,
         quantity=item.quantity,
         miles=item.miles,
