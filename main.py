@@ -472,6 +472,7 @@ class MarketItemCommentResponse(BaseModel):
     updated_at: datetime
     user_id: str
     username: str
+    user_is_admin: bool = False
     item_id: str
 
 # Market Item Messaging Models
@@ -487,6 +488,7 @@ class MarketItemMessageResponse(BaseModel):
     conversation_id: str
     sender_id: str
     sender_username: str
+    sender_is_admin: bool = False
     recipient_id: str
     recipient_username: str
 
@@ -533,6 +535,7 @@ class YardSaleMessageResponse(BaseModel):
     created_at: datetime
     sender_id: str
     sender_username: str
+    sender_is_admin: bool = False
     recipient_id: str
     recipient_username: str
     yard_sale_id: str
@@ -665,6 +668,7 @@ class CommentResponse(BaseModel):
     updated_at: datetime
     user_id: str
     username: str
+    user_is_admin: bool = False
     yard_sale_id: str
 
 # Message Models
@@ -699,6 +703,7 @@ class MessageResponse(BaseModel):
     conversation_id: str
     sender_id: str
     sender_username: str
+    sender_is_admin: bool = False
     recipient_id: str
     recipient_username: str
     notification_id: Optional[str] = None  # NEW: Link to notification
@@ -1732,6 +1737,7 @@ async def get_market_item_conversations(
                 conversation_id=last_msg.conversation_id,
                 sender_id=last_msg.sender_id,
                 sender_username=sender.username if sender else "unknown",
+                sender_is_admin=(sender.permissions == "admin") if sender else False,
                 recipient_id=last_msg.recipient_id,
                 recipient_username=recipient.username if recipient else "unknown"
             )
@@ -1810,6 +1816,7 @@ async def send_market_item_conversation_message(
         conversation_id=db_message.conversation_id,
         sender_id=current_user.id,
         sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown"
     )
@@ -1847,6 +1854,7 @@ async def get_market_item_conversation_messages(
             conversation_id=msg.conversation_id,
             sender_id=msg.sender_id,
             sender_username=sender.username if sender else "unknown",
+            sender_is_admin=(sender.permissions == "admin") if sender else False,
             recipient_id=msg.recipient_id,
             recipient_username=recipient.username if recipient else "unknown"
         ))
@@ -1959,6 +1967,7 @@ async def send_market_item_message(
         conversation_id=db_message.conversation_id,
         sender_id=current_user.id,
         sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown"
     )
@@ -2001,6 +2010,7 @@ async def get_market_item_messages(
             conversation_id=msg.conversation_id,
             sender_id=msg.sender_id,
             sender_username=sender.username if sender else "unknown",
+            sender_is_admin=(sender.permissions == "admin") if sender else False,
             recipient_id=msg.recipient_id,
             recipient_username=recipient.username if recipient else "unknown"
         ))
@@ -2259,6 +2269,7 @@ async def create_market_item_comment(
         updated_at=db_comment.updated_at,
         user_id=current_user.id,
         username=current_user.username,
+        user_is_admin=(current_user.permissions == "admin"),
         item_id=item_id
     )
 
@@ -2279,6 +2290,7 @@ async def get_market_item_comments(item_id: str, db: Session = Depends(get_db)):
             updated_at=c.updated_at,
             user_id=c.user_id,
             username=user.username if user else "",
+            user_is_admin=(user.permissions == "admin") if user else False,
             item_id=item_id
         ))
     return result
@@ -2692,6 +2704,7 @@ async def send_yard_sale_message(
         conversation_id=db_message.conversation_id,
         sender_id=current_user.id,
         sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown",
         yard_sale_id=yard_sale_id
@@ -2737,6 +2750,7 @@ async def get_yard_sale_conversations(
                 conversation_id=last_msg.conversation_id,
                 sender_id=last_msg.sender_id,
                 sender_username=sender.username if sender else "unknown",
+                sender_is_admin=(sender.permissions == "admin") if sender else False,
                 recipient_id=last_msg.recipient_id,
                 recipient_username=recipient.username if recipient else "unknown",
                 yard_sale_id=conv.yard_sale_id
@@ -2803,6 +2817,7 @@ async def get_yard_sale_conversation_messages(
             conversation_id=msg.conversation_id,
             sender_id=msg.sender_id,
             sender_username=sender.username if sender else "unknown",
+            sender_is_admin=(sender.permissions == "admin") if sender else False,
             recipient_id=msg.recipient_id,
             recipient_username=recipient.username if recipient else "unknown",
             yard_sale_id=conversation.yard_sale_id
@@ -2855,6 +2870,7 @@ async def send_yard_sale_conversation_message(
         conversation_id=db_message.conversation_id,
         sender_id=current_user.id,
         sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown",
         yard_sale_id=conversation.yard_sale_id
@@ -3230,7 +3246,8 @@ async def create_comment(
     
     return CommentResponse(
         **db_comment.__dict__,
-        username=current_user.username
+        username=current_user.username,
+        user_is_admin=(current_user.permissions == "admin")
     )
 
 @app.get("/yard-sales/{yard_sale_id}/comments", response_model=List[CommentResponse])
@@ -3248,7 +3265,11 @@ async def get_comments(yard_sale_id: str, db: Session = Depends(get_db)):
         Comment.yard_sale_id == yard_sale_id
     ).order_by(Comment.created_at.asc()).all()
     
-    return [CommentResponse(**comment.__dict__, username=comment.user.username) for comment in comments]
+    return [CommentResponse(
+        **comment.__dict__, 
+        username=comment.user.username,
+        user_is_admin=(comment.user.permissions == "admin")
+    ) for comment in comments]
 
 @app.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_comment(
@@ -3445,6 +3466,7 @@ async def get_conversation_messages(
             conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=sender.username,
+            sender_is_admin=(sender.permissions == "admin"),
             recipient_id=message.recipient_id,
             recipient_username=recipient.username
         ))
@@ -3513,6 +3535,7 @@ async def send_conversation_message(
         conversation_id=message.conversation_id,
         sender_id=message.sender_id,
         sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
         recipient_id=message.recipient_id,
         recipient_username=recipient.username
     )
@@ -3562,6 +3585,7 @@ async def get_user_messages(
             conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=sender.username,
+            sender_is_admin=(sender.permissions == "admin"),
             recipient_id=message.recipient_id,
             recipient_username=recipient.username,
             notification_id=notification_id,
@@ -3767,6 +3791,7 @@ async def send_message_general(
             conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=current_user.username,
+            sender_is_admin=(current_user.permissions == "admin"),
             recipient_id=message.recipient_id,
             recipient_username=recipient.username
         )
@@ -3822,6 +3847,7 @@ async def send_message_general(
             conversation_id=message.conversation_id,
             sender_id=message.sender_id,
             sender_username=current_user.username,
+            sender_is_admin=(current_user.permissions == "admin"),
             recipient_id=message.recipient_id,
             recipient_username=recipient.username
         )
