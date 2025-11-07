@@ -1131,7 +1131,7 @@ async def health_check():
     }
 
 # Authentication endpoints
-@app.post("/api/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
     
@@ -1191,7 +1191,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         updated_at=db_user.updated_at
     )
 
-@app.post("/api/login", response_model=Token)
+@app.post("/login", response_model=Token)
 async def login_user(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """Login user and return access token"""
     user = authenticate_user(db, user_credentials.username, user_credentials.password)
@@ -1220,7 +1220,7 @@ async def logout_user(current_user: User = Depends(get_current_active_user)):
     # For this example, we'll return a success message
     return {"message": "Successfully logged out"}
 
-@app.get("/api/me", response_model=UserResponse)
+@app.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Get current user information"""
     return UserResponse(
@@ -2313,7 +2313,7 @@ async def unwatch_market_item(item_id: str, current_user: User = Depends(get_cur
         db.commit()
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
 
-@app.get("/api/user/watched-items", response_model=List[MarketItemResponse])
+@app.get("/user/watched-items", response_model=List[MarketItemResponse])
 async def get_watched_items(
     current_user: User = Depends(get_current_active_user),
     item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$", alias="status"),
@@ -3896,7 +3896,7 @@ async def create_user_rating(
         yard_sale_title=yard_sale.title if yard_sale else None
     )
 
-@app.get("/api/users/{user_id}/ratings", response_model=List[UserRatingResponse])
+@app.get("/users/{user_id}/ratings", response_model=List[UserRatingResponse])
 async def get_user_ratings(
     user_id: str,
     db: Session = Depends(get_db)
@@ -4177,7 +4177,7 @@ async def get_user_verifications(
     return result
 
 # Additional User Profile Endpoints
-@app.get("/api/users/{user_id}", response_model=UserProfileResponse)
+@app.get("/users/{user_id}", response_model=UserProfileResponse)
 async def get_user_by_id(
     user_id: str,
     db: Session = Depends(get_db)
