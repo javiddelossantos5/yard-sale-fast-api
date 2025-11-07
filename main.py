@@ -1,8 +1,12 @@
 from fastapi import FastAPI, HTTPException, status, Depends, Form, WebSocket, WebSocketDisconnect, UploadFile, File, Header, Cookie, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response
 from pydantic import BaseModel, Field, EmailStr, model_validator
 from typing import List, Optional, Dict
 import uvicorn
@@ -107,7 +111,7 @@ s3_config = Config(
     signature_version='s3v4',
     retries={'max_attempts': 3, 'mode': 'standard'}
 )
-
+    
 # Initialize S3 client for MinIO
 # boto3 automatically handles HTTP vs HTTPS based on the endpoint URL
 # For HTTP endpoints (like http://10.1.2.165:9001), no SSL is used
@@ -122,8 +126,8 @@ s3_client = boto3.client(
     endpoint_url=MINIO_ENDPOINT_URL,
     aws_access_key_id=MINIO_ACCESS_KEY_ID,
     aws_secret_access_key=MINIO_SECRET_ACCESS_KEY,
-    region_name=MINIO_REGION,
-    config=s3_config
+        region_name=MINIO_REGION,
+        config=s3_config
 )
 
 # Helper functions
@@ -187,6 +191,35 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Customize OpenAPI schema to add username/password support
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    from fastapi.openapi.utils import get_openapi
+    
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # Add custom security scheme - only Bearer token (username/password handled via Quick Login widget)
+    openapi_schema["components"]["securitySchemes"] = {
+        "HTTPBearer": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your Bearer token (JWT). You can get this by logging in via /login or /docs-login, or use the Quick Login widget in the top-right corner."
+        }
+    }
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
 # Add CORS middleware to allow requests from frontend
 # Allow both development and production origins
 # Can be overridden with CORS_ORIGINS environment variable (comma-separated)
@@ -215,6 +248,420 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# Helper function to generate login form HTML
+def get_login_form_html(error_message: Optional[str] = None) -> str:
+    """Generate HTML for the admin login form"""
+    error_html = ""
+    if error_message:
+        error_html = f'<div class="error show" id="errorMessage" style="display: block;">{error_message}</div>'
+    
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Admin Login - API Documentation</title>
+        <style>
+            body {{ 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                text-align: center; 
+                padding: 50px 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .container {{
+                background: white;
+                color: #333;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                max-width: 400px;
+                width: 100%;
+            }}
+            h1 {{ color: #667eea; margin-top: 0; margin-bottom: 30px; }}
+            .form-group {{
+                margin-bottom: 20px;
+                text-align: left;
+            }}
+            label {{
+                display: block;
+                margin-bottom: 8px;
+                color: #555;
+                font-weight: 500;
+            }}
+            input {{
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #e0e0e0;
+                border-radius: 5px;
+                font-size: 16px;
+                box-sizing: border-box;
+            }}
+            input:focus {{
+                outline: none;
+                border-color: #667eea;
+            }}
+            button {{
+                width: 100%;
+                padding: 12px;
+                background: #667eea;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 16px;
+                font-weight: bold;
+                cursor: pointer;
+                margin-top: 10px;
+            }}
+            button:hover {{
+                background: #5568d3;
+            }}
+            button:disabled {{
+                background: #ccc;
+                cursor: not-allowed;
+            }}
+            .error {{
+                color: #e74c3c;
+                margin-top: 10px;
+                font-size: 14px;
+                display: none;
+                padding: 10px;
+                background: #fee;
+                border-radius: 5px;
+                border: 1px solid #fcc;
+            }}
+            .error.show {{
+                display: block;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔒 Admin Login</h1>
+            <p style="color: #666; margin-bottom: 30px;">Enter your admin credentials to access the API documentation</p>
+            {error_html}
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <div class="error" id="errorMessage"></div>
+                <button type="submit" id="submitBtn">Login</button>
+            </form>
+        </div>
+        
+        <script>
+            // Clear localStorage token on expired session
+            localStorage.removeItem('swagger_token');
+            
+            document.getElementById('loginForm').addEventListener('submit', async function(e) {{
+                e.preventDefault();
+                const submitBtn = document.getElementById('submitBtn');
+                const errorMsg = document.getElementById('errorMessage');
+                const username = document.getElementById('username').value;
+                const password = document.getElementById('password').value;
+                
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Logging in...';
+                errorMsg.classList.remove('show');
+                
+                try {{
+                    const response = await fetch('/docs-login', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                        }},
+                        credentials: 'include',
+                        body: JSON.stringify({{ username, password }})
+                    }});
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {{
+                        // Store token in localStorage for Swagger UI auto-population
+                        if (data.access_token) {{
+                            localStorage.setItem('swagger_token', data.access_token);
+                        }}
+                        // Redirect to docs
+                        window.location.href = '/docs';
+                    }} else {{
+                        errorMsg.textContent = data.detail || 'Login failed';
+                        errorMsg.classList.add('show');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Login';
+                    }}
+                }} catch (error) {{
+                    errorMsg.textContent = 'An error occurred. Please try again.';
+                    errorMsg.classList.add('show');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Login';
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+
+# Middleware to protect docs endpoints with authentication
+class DocsAuthMiddleware(BaseHTTPMiddleware):
+    """Middleware to require authentication for /docs, /redoc, and /openapi.json endpoints"""
+    
+    async def dispatch(self, request: StarletteRequest, call_next):
+        # Check if the request is for docs, redoc, or openapi.json
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            # Allow OPTIONS requests for CORS
+            if request.method == "OPTIONS":
+                return await call_next(request)
+            
+            # Check for token in Authorization header OR cookie
+            auth_header = request.headers.get("Authorization")
+            token = None
+            
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split("Bearer ")[1]
+            else:
+                # Check for token in cookie
+                token = request.cookies.get("docs_token")
+            
+            if not token:
+                # Return login form for browser requests
+                if "text/html" in request.headers.get("Accept", "") or request.url.path in ["/docs", "/redoc"]:
+                    return Response(
+                        content=get_login_form_html(),
+                        status_code=401,
+                        media_type="text/html"
+                    )
+                # For API/JSON requests, return JSON error
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": "Authentication required to access API documentation",
+                        "message": "Please login first using POST /docs-login with admin credentials"
+                    }
+                )
+            
+            if not token:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid authorization header format. Expected: Authorization: Bearer <token>"}
+                )
+            
+            # Validate token
+            try:
+                # Check if token is blacklisted
+                if token in token_blacklist:
+                    # For browser requests, show login form
+                    if "text/html" in request.headers.get("Accept", "") or request.url.path in ["/docs", "/redoc"]:
+                        return Response(
+                            content=get_login_form_html("Token has been revoked. Please login again."),
+                            status_code=401,
+                            media_type="text/html"
+                        )
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Token has been revoked. Please login again."}
+                    )
+                
+                # Decode and validate token
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                username = payload.get("sub")
+                if not username:
+                    # For browser requests, show login form
+                    if "text/html" in request.headers.get("Accept", "") or request.url.path in ["/docs", "/redoc"]:
+                        return Response(
+                            content=get_login_form_html("Invalid token. Please login again."),
+                            status_code=401,
+                            media_type="text/html"
+                        )
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid token"}
+                    )
+                
+                # Token is valid, allow request to proceed
+                
+            except JWTError as e:
+                # Token expired or invalid - show login form for browser requests
+                if "text/html" in request.headers.get("Accept", "") or request.url.path in ["/docs", "/redoc"]:
+                    return Response(
+                        content=get_login_form_html("Your session has expired. Please login again."),
+                        status_code=401,
+                        media_type="text/html"
+                    )
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or expired token. Please login again."}
+                )
+        
+        # Inject JavaScript into Swagger UI to auto-populate token and add username/password support
+        if request.url.path == "/docs" and request.method == "GET":
+            response = await call_next(request)
+            
+            # Only try to inject JavaScript if it's an HTML response
+            if hasattr(response, 'body_iterator') and response.media_type == "text/html":
+                try:
+                    # Read the response body
+                    body = b""
+                    async for chunk in response.body_iterator:
+                        body += chunk
+                    
+                    # Convert to string
+                    html = body.decode('utf-8')
+                    
+                    # Inject JavaScript before closing body tag
+                    js_injection = """
+                <script>
+                (function() {
+                    // Auto-populate Bearer token from localStorage
+                    window.addEventListener('load', function() {
+                        const token = localStorage.getItem('swagger_token');
+                        if (token) {
+                            // Wait for Swagger UI to initialize
+                            setTimeout(function() {
+                                // Find the authorize button and click it
+                                const authorizeBtn = document.querySelector('.btn.authorize');
+                                if (authorizeBtn) {
+                                    authorizeBtn.click();
+                                    
+                                    // Wait for modal to open, then fill in token
+                                    setTimeout(function() {
+                                        const tokenInput = document.querySelector('input[placeholder*="Bearer"], input[type="text"][name*="bearer"], input[type="text"][name*="Bearer"]');
+                                        if (tokenInput) {
+                                            tokenInput.value = token;
+                                            // Trigger input event to update Swagger UI
+                                            tokenInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                            
+                                            // Click authorize button in modal
+                                            setTimeout(function() {
+                                                const authorizeModalBtn = document.querySelector('.modal-btn.authorize');
+                                                if (authorizeModalBtn) {
+                                                    authorizeModalBtn.click();
+                                                }
+                                            }, 100);
+                                        }
+                                    }, 300);
+                                }
+                            }, 1000);
+                        }
+                        
+                        // Add username/password login helper
+                        const addLoginHelper = function() {
+                            const swaggerUI = document.querySelector('.swagger-ui');
+                            if (!swaggerUI) return;
+                            
+                            // Check if helper already exists
+                            if (document.getElementById('swagger-login-helper')) return;
+                            
+                            const helper = document.createElement('div');
+                            helper.id = 'swagger-login-helper';
+                            helper.style.cssText = 'position: fixed; top: 10px; right: 10px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 10000; max-width: 320px; border: 2px solid #667eea;';
+                            helper.innerHTML = `
+                                <h4 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea; font-weight: bold;">🔐 Quick Login</h4>
+                                <p style="margin: 0 0 15px 0; font-size: 12px; color: #666;">Enter your credentials to get a token automatically</p>
+                                <div style="margin-bottom: 10px;">
+                                    <label style="display: block; margin-bottom: 5px; font-size: 13px; color: #555; font-weight: 500;">Username</label>
+                                    <input type="text" id="swagger-username" placeholder="Enter username" style="width: 100%; padding: 8px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                                </div>
+                                <div style="margin-bottom: 15px;">
+                                    <label style="display: block; margin-bottom: 5px; font-size: 13px; color: #555; font-weight: 500;">Password</label>
+                                    <input type="password" id="swagger-password" placeholder="Enter password" style="width: 100%; padding: 8px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                                </div>
+                                <button id="swagger-login-btn" style="width: 100%; padding: 10px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold;">Login & Auto-Authorize</button>
+                                <div id="swagger-login-error" style="color: #e74c3c; font-size: 12px; margin-top: 10px; padding: 8px; background: #fee; border-radius: 4px; display: none;"></div>
+                            `;
+                            document.body.appendChild(helper);
+                            
+                            document.getElementById('swagger-login-btn').addEventListener('click', async function() {
+                                const username = document.getElementById('swagger-username').value;
+                                const password = document.getElementById('swagger-password').value;
+                                const errorDiv = document.getElementById('swagger-login-error');
+                                
+                                if (!username || !password) {
+                                    errorDiv.textContent = 'Please enter username and password';
+                                    errorDiv.style.display = 'block';
+                                    return;
+                                }
+                                
+                                try {
+                                    const response = await fetch('/login', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        credentials: 'include',
+                                        body: JSON.stringify({ username, password })
+                                    });
+                                    
+                                    const data = await response.json();
+                                    
+                                    if (response.ok && data.access_token) {
+                                        // Store token
+                                        localStorage.setItem('swagger_token', data.access_token);
+                                        
+                                        // Auto-populate in Swagger UI
+                                        const authorizeBtn = document.querySelector('.btn.authorize');
+                                        if (authorizeBtn) {
+                                            authorizeBtn.click();
+                                            setTimeout(function() {
+                                                const tokenInput = document.querySelector('input[placeholder*="Bearer"], input[type="text"][name*="bearer"]');
+                                                if (tokenInput) {
+                                                    tokenInput.value = data.access_token;
+                                                    tokenInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                                    setTimeout(function() {
+                                                        const authorizeModalBtn = document.querySelector('.modal-btn.authorize');
+                                                        if (authorizeModalBtn) authorizeModalBtn.click();
+                                                    }, 100);
+                                                }
+                                            }, 300);
+                                        }
+                                        
+                                        errorDiv.style.display = 'none';
+                                        helper.style.display = 'none';
+                                    } else {
+                                        errorDiv.textContent = data.detail || 'Login failed';
+                                        errorDiv.style.display = 'block';
+                                    }
+                                } catch (error) {
+                                    errorDiv.textContent = 'Error: ' + error.message;
+                                    errorDiv.style.display = 'block';
+                                }
+                            });
+                        };
+                        
+                        // Wait a bit for Swagger UI to load, then add helper
+                        setTimeout(addLoginHelper, 1500);
+                    });
+                })();
+                </script>
+                """
+                    
+                    # Insert before closing body tag
+                    html = html.replace('</body>', js_injection + '</body>')
+                    
+                    # Create new response
+                    from starlette.responses import HTMLResponse
+                    return HTMLResponse(content=html, status_code=response.status_code, headers=dict(response.headers))
+                except Exception as e:
+                    # If injection fails, just return the original response
+                    # Log the error but don't crash
+                    import logging
+                    logging.error(f"Failed to inject JavaScript into Swagger UI: {e}")
+                    return response
+            else:
+                # Not an HTML response, return as-is
+                return response
+        
+        # For all other paths, proceed normally
+        return await call_next(request)
+
+# Add docs authentication middleware (after CORS, before routes)
+app.add_middleware(DocsAuthMiddleware)
 
 # Mount static files for frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -1036,7 +1483,7 @@ def get_password_hash(password: str) -> str:
             if len(final_bytes) > 72:
                 final_bytes = final_bytes[:72]
                 password = final_bytes.decode('utf-8', errors='ignore')
-            return pwd_context.hash(password)
+        return pwd_context.hash(password)
         raise
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -1226,6 +1673,56 @@ async def login_user(user_credentials: UserLogin, db: Session = Depends(get_db))
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60  # in seconds
     }
+
+@app.post("/docs-login")
+async def docs_login(
+    credentials: UserLogin,
+    db: Session = Depends(get_db)
+):
+    """Login endpoint specifically for docs access - admin only"""
+    user = authenticate_user(db, credentials.username, credentials.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password"
+        )
+    
+    # Check if user is admin
+    if user.permissions != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required to view API documentation"
+        )
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    # Create JSON response with token (JavaScript will handle redirect)
+    response = JSONResponse(
+        content={
+            "message": "Login successful",
+            "redirect": "/docs",
+            "access_token": access_token,  # Include token for localStorage
+            "token_type": "bearer"
+        }
+    )
+    
+    # Set HTTP-only cookie with token (expires in 3 hours)
+    # Use secure=True in production (HTTPS), secure=False for local dev
+    is_https = os.getenv("DOMAIN_NAME", "").startswith("https://") or "api.yardsalefinders.com" in os.getenv("DOMAIN_NAME", "")
+    response.set_cookie(
+        key="docs_token",
+        value=access_token,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=is_https,  # Only send over HTTPS in production
+        samesite="lax"
+    )
+    
+    return response
 
 @app.post("/logout", status_code=status.HTTP_200_OK)
 async def logout_user(current_user: User = Depends(get_current_active_user)):
@@ -4719,23 +5216,23 @@ async def get_all_users(
         users = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
         
         result = [
-            UserResponse(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                full_name=user.full_name,
-                phone_number=user.phone_number,
-                city=user.city,
-                state=user.state,
-                zip_code=user.zip_code,
-                bio=user.bio,
-                is_active=user.is_active,
-                permissions=UserPermission(user.permissions),
-                created_at=user.created_at,
-                updated_at=user.updated_at
-            )
-            for user in users
-        ]
+        UserResponse(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            full_name=user.full_name,
+            phone_number=user.phone_number,
+            city=user.city,
+            state=user.state,
+            zip_code=user.zip_code,
+            bio=user.bio,
+            is_active=user.is_active,
+            permissions=UserPermission(user.permissions),
+            created_at=user.created_at,
+            updated_at=user.updated_at
+        )
+        for user in users
+    ]
         
         return {
             "users": result,
