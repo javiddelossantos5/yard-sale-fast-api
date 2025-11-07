@@ -87,7 +87,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 180  # 3 hours
 # Use environment variables if set, otherwise use defaults
 # MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "https://s3image.yardsalefinders.com")
 # MinIO uses port 9000 for S3 API, port 9001 for web console
-MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "http://10.1.2.165:9000", "https://s3image.yardsalefinders.com") # "https://s3image.yardsalefinders.com"
+MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "http://10.1.2.165:9000") # "https://s3image.yardsalefinders.com"
 MINIO_ACCESS_KEY_ID = os.getenv("MINIO_ACCESS_KEY_ID", "minioadmin")
 MINIO_SECRET_ACCESS_KEY = os.getenv("MINIO_SECRET_ACCESS_KEY", "minioadmin")
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "yardsale")
