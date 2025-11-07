@@ -1,0 +1,322 @@
+# Proxy API endpoints to backend BEFORE default location
+# These must come before the default location / block
+
+# IMAGE PROXY - MUST be first with highest priority (^~ = preferential prefix match)
+# /image-proxy/* - direct proxy (no /api prefix)
+location ^~ /image-proxy/ {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+}
+
+# /api/image-proxy/* - rewrite to /image-proxy/*
+location ^~ /api/image-proxy/ {
+    rewrite ^/api/image-proxy/(.*)$ /image-proxy/$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+}
+
+# /api/login - rewrite to /login (backend removed /api prefix)
+location = /api/login {
+    rewrite ^/api/login$ /login break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/register - rewrite to /register (backend removed /api prefix)
+location = /api/register {
+    rewrite ^/api/register$ /register break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/upload/image - rewrite to /upload/image
+location = /api/upload/image {
+    rewrite ^/api/upload/image$ /upload/image break;
+    proxy_pass http://10.1.2.165:8000;
+    client_max_body_size 10M;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /upload/image - direct proxy (no /api prefix)
+location = /upload/image {
+    proxy_pass http://10.1.2.165:8000;
+    client_max_body_size 10M;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/images - rewrite to /images
+location = /api/images {
+    rewrite ^/api/images$ /images break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /images - direct proxy (no /api prefix)
+location = /images {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/images/* - rewrite to /images/*
+location ~ ^/api/images/(.*)$ {
+    rewrite ^/api/images/(.*)$ /images/$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /images/* - direct proxy (no /api prefix) - for DELETE requests
+location ~ ^/images/(.*)$ {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/me - rewrite to /me (backend removed /api prefix)
+location = /api/me {
+    rewrite ^/api/me$ /me break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/user/watched-items - rewrite to /user/watched-items
+location = /api/user/watched-items {
+    rewrite ^/api/user/watched-items$ /user/watched-items break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/users/* - rewrite to /users/* (user profiles and ratings)
+location ~ ^/api/users/(.*)$ {
+    rewrite ^/api/users/(.*)$ /users/$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/yard-sales/* - rewrite to /yard-sales/*
+location ~ ^/api/yard-sales(.*)$ {
+    rewrite ^/api/yard-sales(.*)$ /yard-sales$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/market-items/* - rewrite to /market-items/*
+location ~ ^/api/market-items(.*)$ {
+    rewrite ^/api/market-items(.*)$ /market-items$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /api/admin/* - rewrite to /admin/*
+location ~ ^/api/admin/(.*)$ {
+    rewrite ^/api/admin/(.*)$ /admin/$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# Direct yard-sales endpoints (without /api) - proxy directly
+location ~ ^/yard-sales {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# Direct market-items endpoints (without /api) - proxy directly
+location ~ ^/market-items {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# Admin endpoints (direct, without /api)
+location ~ ^/admin {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# Upload endpoint (generic - catches /upload/* but not /upload/image which is handled above)
+location ~ ^/upload {
+    client_max_body_size 10M;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# API docs
+location ~ ^/(docs|redoc|openapi.json) {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# /logout and /reset-password - always proxy to backend
+location ~ ^/(logout|reset-password)$ {
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
+# All other /api/* endpoints - rewrite to remove /api prefix
+# This catches any /api/* endpoints not explicitly handled above
+location ~ ^/api/(.*)$ {
+    rewrite ^/api/(.*)$ /$1 break;
+    proxy_pass http://10.1.2.165:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    proxy_set_header Connection "";
+}
+
