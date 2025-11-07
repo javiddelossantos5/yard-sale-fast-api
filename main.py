@@ -350,7 +350,7 @@ class ItemUpdate(BaseModel):
     is_available: Optional[bool] = None
     # Allow updating marketplace fields on private items route too
     is_public: Optional[bool] = None
-    status: Optional[str] = Field(None, pattern="^(active|sold|hidden)$")
+    status: Optional[str] = Field(None, pattern="^(active|pending|sold|hidden)$")
     category: Optional[str] = Field(None, max_length=100)
     photos: Optional[List[str]] = None
     featured_image: Optional[str] = Field(None, max_length=500)
@@ -364,7 +364,7 @@ class MarketItemCreate(BaseModel):
     price: float = Field(..., ge=0, description="Item price (0 for free items)")
     is_free: bool = Field(False, description="Mark item as free (if True, price should be 0)")
     is_public: bool = True
-    status: Optional[str] = Field("active", pattern="^(active|sold|hidden)$")
+    status: Optional[str] = Field("active", pattern="^(active|pending|sold|hidden)$")
     category: Optional[str] = Field(None, max_length=100)
     photos: Optional[List[str]] = None
     featured_image: Optional[str] = Field(None, max_length=500)
@@ -377,6 +377,7 @@ class MarketItemCreate(BaseModel):
     contact_email: Optional[str] = Field(None, max_length=100, description="Seller's email for customer communication")
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
     quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
+    miles: Optional[int] = Field(None, ge=0, description="Mileage for automotive items (optional)")
     
     @model_validator(mode='after')
     def validate_free_item(self):
@@ -395,7 +396,7 @@ class MarketItemUpdate(BaseModel):
     price: Optional[float] = Field(None, ge=0, description="Item price (0 for free items)")
     is_free: Optional[bool] = Field(None, description="Mark item as free (if True, price should be 0)")
     is_public: Optional[bool] = None
-    status: Optional[str] = Field(None, pattern="^(active|sold|hidden)$")
+    status: Optional[str] = Field(None, pattern="^(active|pending|sold|hidden)$")
     category: Optional[str] = Field(None, max_length=100)
     photos: Optional[List[str]] = None
     featured_image: Optional[str] = Field(None, max_length=500)
@@ -408,6 +409,7 @@ class MarketItemUpdate(BaseModel):
     contact_email: Optional[str] = Field(None, max_length=100)
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
     quantity: Optional[int] = Field(None, ge=1, description="Number of items available (None means not specified/unlimited)")
+    miles: Optional[int] = Field(None, ge=0, description="Mileage for automotive items (optional)")
     
     @model_validator(mode='after')
     def validate_free_item(self):
@@ -447,6 +449,7 @@ class MarketItemResponse(BaseModel):
     contact_email: Optional[str]
     condition: Optional[str] = None
     quantity: Optional[int] = None
+    miles: Optional[int] = None  # Mileage for automotive items
     is_free: bool = False  # Whether the item is free (price == 0 or is_free flag set)
     comment_count: int = 0
     created_at: datetime
@@ -1348,6 +1351,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         contact_email=item.contact_email,
         condition=item.condition,
         quantity=item.quantity,
+        miles=item.miles,
         is_free=final_is_free,
         owner_id=current_user.id
     )
@@ -1380,6 +1384,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         contact_email=db_item.contact_email,
         condition=db_item.condition,
         quantity=db_item.quantity,
+        miles=db_item.miles,
         is_free=final_is_free,
         comment_count=0,
         created_at=db_item.created_at,
@@ -1396,7 +1401,7 @@ async def list_market_items(
     category: Optional[str] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden|all)$", alias="status", description="Filter by status (active, sold, hidden, or all)"),
+    item_status: Optional[str] = Query(None, pattern="^(active|pending|sold|hidden|all)$", alias="status", description="Filter by status (active, pending, sold, hidden, or all)"),
     accepts_best_offer: Optional[bool] = Query(None, description="Filter items that accept best offers"),
     price_reduced: Optional[bool] = Query(None, description="Filter items with reduced prices"),
     is_free: Optional[bool] = Query(None, description="Filter free items (true) or paid items (false)"),
@@ -1426,8 +1431,8 @@ async def list_market_items(
             if item_status and item_status != "all":
                 query = query.filter(Item.status == item_status)
             elif not item_status:
-                # Default: exclude hidden items
-                query = query.filter(Item.status != "hidden")
+                # Default: exclude hidden and pending items (only show active and sold)
+                query = query.filter(Item.status != "hidden", Item.status != "pending")
             # If status is "all", don't filter by status
         except (OperationalError, ProgrammingError, AttributeError):
             pass  # Column doesn't exist, skip filter
@@ -1664,6 +1669,7 @@ async def list_market_items(
                     contact_email=i.contact_email,
                     condition=i.condition,
                     quantity=i.quantity,
+                    miles=i.miles,
                     is_free=is_free,
                     comment_count=comment_count,
                     created_at=i.created_at,
@@ -2227,6 +2233,7 @@ async def get_market_item(item_id: str, authorization: Optional[str] = Header(No
             contact_email=item.contact_email,
             condition=item.condition,
             quantity=item.quantity,
+            miles=item.miles,
             is_free=is_free,
             comment_count=comment_count,
             created_at=item.created_at,
@@ -2333,7 +2340,7 @@ async def unwatch_market_item(item_id: str, current_user: User = Depends(get_cur
 @app.get("/user/watched-items", response_model=List[MarketItemResponse])
 async def get_watched_items(
     current_user: User = Depends(get_current_active_user),
-    item_status: Optional[str] = Query(None, pattern="^(active|sold|hidden)$", alias="status"),
+    item_status: Optional[str] = Query(None, pattern="^(active|pending|sold|hidden)$", alias="status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db)
@@ -2391,6 +2398,7 @@ async def get_watched_items(
             contact_email=item.contact_email,
             condition=item.condition,
             quantity=item.quantity,
+            miles=item.miles,
             is_free=is_free,
             comment_count=comment_count,
             created_at=item.created_at,
@@ -2477,6 +2485,7 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
         contact_email=item.contact_email,
         condition=item.condition,
         quantity=item.quantity,
+        miles=item.miles,
         is_free=is_free,
         comment_count=db.query(MarketItemComment).filter(MarketItemComment.item_id == item.id).count(),
         created_at=item.created_at,

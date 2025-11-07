@@ -101,7 +101,7 @@ class Item(Base):
     
     # Marketplace fields
     is_public = Column(Boolean, default=True, nullable=False)
-    status = Column(String(20), default="active", nullable=False)  # active, sold, hidden
+    status = Column(String(20), default="active", nullable=False)  # active, pending, sold, hidden
     category = Column(String(100), nullable=True)
     photos = Column(JSON, nullable=True)
     featured_image = Column(String(500), nullable=True)
@@ -123,6 +123,7 @@ class Item(Base):
     condition = Column(String(50), nullable=True)  # e.g., "new", "like new", "good", "fair", "poor"
     quantity = Column(Integer, nullable=True)  # Number of items available (None means not specified/unlimited)
     is_free = Column(Boolean, default=False, nullable=False)  # Whether the item is free (price == 0)
+    miles = Column(Integer, nullable=True)  # Mileage for automotive items (optional)
     
     # Relationship with user
     owner = relationship("User", back_populates="items")
