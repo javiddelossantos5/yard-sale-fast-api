@@ -23,6 +23,24 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
+# Ensure MINIO_ENDPOINT_URL is set in .env
+if ! grep -q "^MINIO_ENDPOINT_URL=" .env 2>/dev/null; then
+    echo "📝 Adding MINIO_ENDPOINT_URL to .env..."
+    echo "MINIO_ENDPOINT_URL=https://s3image.yardsalefinders.com" >> .env
+    echo "   ✅ Added MINIO_ENDPOINT_URL"
+elif ! grep -q "^MINIO_ENDPOINT_URL=https://s3image.yardsalefinders.com" .env 2>/dev/null; then
+    echo "📝 Updating MINIO_ENDPOINT_URL in .env..."
+    # Update existing MINIO_ENDPOINT_URL line
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        sed -i '' 's|^MINIO_ENDPOINT_URL=.*|MINIO_ENDPOINT_URL=https://s3image.yardsalefinders.com|' .env
+    else
+        # Linux
+        sed -i 's|^MINIO_ENDPOINT_URL=.*|MINIO_ENDPOINT_URL=https://s3image.yardsalefinders.com|' .env
+    fi
+    echo "   ✅ Updated MINIO_ENDPOINT_URL to https://s3image.yardsalefinders.com"
+fi
+
 # Check if virtual environment exists
 if [ ! -d "venv" ]; then
     echo "📦 Creating virtual environment..."
@@ -68,4 +86,3 @@ echo ""
 
 # Run with auto-reload
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
