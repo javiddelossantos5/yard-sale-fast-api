@@ -112,6 +112,7 @@ class Item(Base):
     facebook_url = Column(String(500), nullable=True)
     
     # Contact information for customer communication
+    seller = Column(String(100), nullable=True)  # Seller name/contact name (optional)
     contact_phone = Column(String(20), nullable=True)  # Seller's phone number for this item
     contact_email = Column(String(100), nullable=True)  # Seller's email for this item
     

@@ -881,6 +881,7 @@ class MarketItemCreate(BaseModel):
     payment_methods: Optional[List[str]] = None
     venmo_url: Optional[str] = Field(None, max_length=500)
     facebook_url: Optional[str] = Field(None, max_length=500)
+    seller: Optional[str] = Field(None, max_length=100, description="Seller name/contact name (optional)")
     contact_phone: Optional[str] = Field(None, max_length=20, description="Seller's phone number for customer communication")
     contact_email: Optional[str] = Field(None, max_length=100, description="Seller's email for customer communication")
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
@@ -913,6 +914,7 @@ class MarketItemUpdate(BaseModel):
     payment_methods: Optional[List[str]] = None
     venmo_url: Optional[str] = Field(None, max_length=500)
     facebook_url: Optional[str] = Field(None, max_length=500)
+    seller: Optional[str] = Field(None, max_length=100, description="Seller name/contact name (optional)")
     contact_phone: Optional[str] = Field(None, max_length=20)
     contact_email: Optional[str] = Field(None, max_length=100)
     condition: Optional[str] = Field(None, max_length=50, description="Item condition (e.g., new, like new, good, fair, poor)")
@@ -953,6 +955,7 @@ class MarketItemResponse(BaseModel):
     payment_methods: Optional[List[str]]
     venmo_url: Optional[str]
     facebook_url: Optional[str]
+    seller: Optional[str] = None  # Seller name/contact name (optional)
     contact_phone: Optional[str]
     contact_email: Optional[str]
     condition: Optional[str] = None
@@ -1905,6 +1908,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         payment_methods=item.payment_methods,
         venmo_url=item.venmo_url,
         facebook_url=item.facebook_url,
+        seller=item.seller,
         contact_phone=item.contact_phone,
         contact_email=item.contact_email,
         condition=item.condition,
@@ -1938,6 +1942,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         payment_methods=db_item.payment_methods,
         venmo_url=db_item.venmo_url,
         facebook_url=db_item.facebook_url,
+        seller=db_item.seller,
         contact_phone=db_item.contact_phone,
         contact_email=db_item.contact_email,
         condition=db_item.condition,
@@ -2223,6 +2228,7 @@ async def list_market_items(
                     payment_methods=i.payment_methods,
                     venmo_url=i.venmo_url,
                     facebook_url=i.facebook_url,
+                    seller=i.seller,
                     contact_phone=i.contact_phone,
                     contact_email=i.contact_email,
                     condition=i.condition,
@@ -2787,6 +2793,7 @@ async def get_market_item(item_id: str, authorization: Optional[str] = Header(No
             payment_methods=item.payment_methods,
             venmo_url=item.venmo_url,
             facebook_url=item.facebook_url,
+            seller=item.seller,
             contact_phone=item.contact_phone,
             contact_email=item.contact_email,
             condition=item.condition,
@@ -2952,6 +2959,7 @@ async def get_watched_items(
             payment_methods=item.payment_methods,
             venmo_url=item.venmo_url,
             facebook_url=item.facebook_url,
+            seller=item.seller,
             contact_phone=item.contact_phone,
             contact_email=item.contact_email,
             condition=item.condition,
@@ -3008,7 +3016,11 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
             item.last_price_change_date = get_mountain_time()
     
     for field, value in update_data.items():
-        setattr(item, field, value)
+        # Handle empty strings for optional string fields (convert to None)
+        if field in ['seller', 'contact_phone', 'contact_email', 'description', 'category', 'condition'] and value == "":
+            setattr(item, field, None)
+        else:
+            setattr(item, field, value)
     
     db.commit()
     db.refresh(item)
@@ -3039,6 +3051,7 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
         payment_methods=item.payment_methods,
         venmo_url=item.venmo_url,
         facebook_url=item.facebook_url,
+        seller=item.seller,
         contact_phone=item.contact_phone,
         contact_email=item.contact_email,
         condition=item.condition,
