@@ -261,7 +261,8 @@ class UserCreate(UserBase):
     full_name: Optional[str] = Field(None, max_length=100, description="Full name")
     location: Optional[Location] = None
     bio: Optional[str] = Field(None, max_length=1000, description="User bio")
-    permissions: UserPermission = Field(UserPermission.USER, description="User permission level")
+    # NOTE: permissions field removed - all new users are created with "user" permission
+    # Only admins can change permissions via /admin/users/{user_id} endpoint
     
     @model_validator(mode='after')
     def verify_password_match(self):
@@ -1180,7 +1181,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         zip_code=zip_code,
         bio=user.bio,
         is_active=True,
-        permissions=user.permissions.value
+        permissions="user"  # Always create new users with "user" permission - only admins can change this
     )
     
     db.add(db_user)
