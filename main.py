@@ -565,7 +565,8 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
                             helper.style.cssText = 'position: fixed; top: 10px; right: 10px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 10000; max-width: 320px; border: 2px solid #667eea;';
                             helper.innerHTML = `
                                 <h4 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea; font-weight: bold;">🔐 Quick Login</h4>
-                                <p style="margin: 0 0 15px 0; font-size: 12px; color: #666;">Enter your credentials to get a token automatically</p>
+                                <button id="swagger-quick-login-btn" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 15px;">⚡ Quick Login (javiddelossantos)</button>
+                                <p style="margin: 0 0 15px 0; font-size: 12px; color: #666; text-align: center;">Or enter credentials manually:</p>
                                 <div style="margin-bottom: 10px;">
                                     <label style="display: block; margin-bottom: 5px; font-size: 13px; color: #555; font-weight: 500;">Username</label>
                                     <input type="text" id="swagger-username" placeholder="Enter username" style="width: 100%; padding: 8px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
@@ -579,6 +580,65 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
                             `;
                             document.body.appendChild(helper);
                             
+                            // Quick login button (auto-fills credentials)
+                            document.getElementById('swagger-quick-login-btn').addEventListener('click', async function() {
+                                const username = 'javiddelossantos';
+                                const password = 'Password';
+                                const errorDiv = document.getElementById('swagger-login-error');
+                                const quickBtn = document.getElementById('swagger-quick-login-btn');
+                                
+                                quickBtn.disabled = true;
+                                quickBtn.textContent = 'Logging in...';
+                                errorDiv.style.display = 'none';
+                                
+                                try {
+                                    const response = await fetch('/login', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        credentials: 'include',
+                                        body: JSON.stringify({ username, password })
+                                    });
+                                    
+                                    const data = await response.json();
+                                    
+                                    if (response.ok && data.access_token) {
+                                        // Store token
+                                        localStorage.setItem('swagger_token', data.access_token);
+                                        
+                                        // Auto-populate in Swagger UI
+                                        const authorizeBtn = document.querySelector('.btn.authorize');
+                                        if (authorizeBtn) {
+                                            authorizeBtn.click();
+                                            setTimeout(function() {
+                                                const tokenInput = document.querySelector('input[placeholder*="Bearer"], input[type="text"][name*="bearer"]');
+                                                if (tokenInput) {
+                                                    tokenInput.value = data.access_token;
+                                                    tokenInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                                    setTimeout(function() {
+                                                        const authorizeModalBtn = document.querySelector('.modal-btn.authorize');
+                                                        if (authorizeModalBtn) authorizeModalBtn.click();
+                                                    }, 100);
+                                                }
+                                            }, 300);
+                                        }
+                                        
+                                        errorDiv.style.display = 'none';
+                                        helper.style.display = 'none';
+                                    } else {
+                                        errorDiv.textContent = data.detail || 'Login failed';
+                                        errorDiv.style.display = 'block';
+                                        quickBtn.disabled = false;
+                                        quickBtn.textContent = '⚡ Quick Login (javiddelossantos)';
+                                    }
+                                } catch (error) {
+                                    errorDiv.textContent = 'Error: ' + error.message;
+                                    errorDiv.style.display = 'block';
+                                    quickBtn.disabled = false;
+                                    quickBtn.textContent = '⚡ Quick Login (javiddelossantos)';
+                                }
+                            });
+                            
+                            // Manual login button
                             document.getElementById('swagger-login-btn').addEventListener('click', async function() {
                                 const username = document.getElementById('swagger-username').value;
                                 const password = document.getElementById('swagger-password').value;
@@ -1504,8 +1564,8 @@ def get_user_by_username(db: Session, username: str):
         (User.username == username) | (User.email == username)
     ).first()
 
-def get_user_by_id(db: Session, user_id: str):
-    """Get user by ID"""
+def get_user_by_id_helper(db: Session, user_id: str):
+    """Get user by ID (helper function)"""
     return db.query(User).filter(User.id == user_id).first()
 
 def authenticate_user(db: Session, username: str, password: str):
@@ -5254,7 +5314,7 @@ async def get_user_by_id_admin(
     db: Session = Depends(get_db)
 ):
     """Get user by ID (admin only)"""
-    user = get_user_by_id(db, user_id)
+    user = get_user_by_id_helper(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -5283,7 +5343,14 @@ class UserUpdateAdmin(BaseModel):
     zip_code: Optional[str] = Field(None, max_length=10)
     bio: Optional[str] = Field(None, max_length=1000)
     is_active: Optional[bool] = None
-    permissions: Optional[UserPermission] = None
+    permissions: Optional[str] = Field(None, description="User permission level: 'user', 'moderator', or 'admin'")
+    
+    def model_post_init(self, __context):
+        """Validate permissions value if provided"""
+        if self.permissions is not None:
+            valid_permissions = ["user", "moderator", "admin"]
+            if self.permissions not in valid_permissions:
+                raise ValueError(f"permissions must be one of: {', '.join(valid_permissions)}")
 
 @app.put("/admin/users/{user_id}", response_model=UserResponse)
 async def update_user_admin(
@@ -5293,34 +5360,49 @@ async def update_user_admin(
     db: Session = Depends(get_db)
 ):
     """Update user (admin only)"""
-    user = get_user_by_id(db, user_id)
+    user = get_user_by_id_helper(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Update fields if provided
+    # Update fields if provided (handle empty strings as None)
     if user_update.full_name is not None:
-        user.full_name = user_update.full_name
+        value = user_update.full_name.strip() if isinstance(user_update.full_name, str) else user_update.full_name
+        user.full_name = value if value else None
     if user_update.email is not None:
-        user.email = user_update.email
+        value = user_update.email.strip() if isinstance(user_update.email, str) else user_update.email
+        user.email = value if value else None
     if user_update.phone_number is not None:
-        user.phone_number = user_update.phone_number
+        value = user_update.phone_number.strip() if isinstance(user_update.phone_number, str) else user_update.phone_number
+        user.phone_number = value if value else None
     if user_update.city is not None:
-        user.city = user_update.city
+        value = user_update.city.strip() if isinstance(user_update.city, str) else user_update.city
+        user.city = value if value else None
     if user_update.state is not None:
-        user.state = user_update.state
+        value = user_update.state.strip() if isinstance(user_update.state, str) else user_update.state
+        user.state = value if value else None
     if user_update.zip_code is not None:
-        user.zip_code = user_update.zip_code
+        value = user_update.zip_code.strip() if isinstance(user_update.zip_code, str) else user_update.zip_code
+        user.zip_code = value if value else None
     if user_update.bio is not None:
-        user.bio = user_update.bio
+        value = user_update.bio.strip() if isinstance(user_update.bio, str) else user_update.bio
+        user.bio = value if value else None
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
     if user_update.permissions is not None:
-        user.permissions = user_update.permissions.value
+        # Permissions is now a string (validated in the model)
+        user.permissions = user_update.permissions
     
     user.updated_at = get_mountain_time()
     
-    db.commit()
-    db.refresh(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}"
+        )
     
     return UserResponse(
         id=user.id,
@@ -5345,7 +5427,7 @@ async def delete_user_admin(
     db: Session = Depends(get_db)
 ):
     """Delete user (admin only)"""
-    user = get_user_by_id(db, user_id)
+    user = get_user_by_id_helper(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -5356,10 +5438,59 @@ async def delete_user_admin(
             detail="Cannot delete your own account"
         )
     
-    db.delete(user)
-    db.commit()
-    
-    return {"message": "User deleted successfully"}
+    try:
+        # Delete related records first to avoid foreign key constraint errors
+        # Delete user's items
+        db.query(Item).filter(Item.owner_id == user.id).delete()
+        
+        # Delete user's yard sales
+        db.query(YardSale).filter(YardSale.owner_id == user.id).delete()
+        
+        # Delete user's comments
+        db.query(Comment).filter(Comment.user_id == user.id).delete()
+        db.query(MarketItemComment).filter(MarketItemComment.user_id == user.id).delete()
+        
+        # Delete user's messages and conversations
+        db.query(Message).filter(Message.sender_id == user.id).delete()
+        db.query(Message).filter(Message.recipient_id == user.id).delete()
+        db.query(MarketItemMessage).filter(MarketItemMessage.sender_id == user.id).delete()
+        db.query(MarketItemMessage).filter(MarketItemMessage.recipient_id == user.id).delete()
+        db.query(Conversation).filter(Conversation.participant1_id == user.id).delete()
+        db.query(Conversation).filter(Conversation.participant2_id == user.id).delete()
+        db.query(MarketItemConversation).filter(MarketItemConversation.participant1_id == user.id).delete()
+        db.query(MarketItemConversation).filter(MarketItemConversation.participant2_id == user.id).delete()
+        
+        # Delete user's ratings (both given and received)
+        db.query(UserRating).filter(UserRating.reviewer_id == user.id).delete()
+        db.query(UserRating).filter(UserRating.rated_user_id == user.id).delete()
+        
+        # Delete user's reports
+        db.query(Report).filter(Report.reporter_id == user.id).delete()
+        
+        # Delete user's watched items
+        db.query(WatchedItem).filter(WatchedItem.user_id == user.id).delete()
+        
+        # Delete user's visited yard sales
+        db.query(VisitedYardSale).filter(VisitedYardSale.user_id == user.id).delete()
+        
+        # Delete user's notifications
+        db.query(Notification).filter(Notification.user_id == user.id).delete()
+        db.query(Notification).filter(Notification.related_user_id == user.id).delete()
+        
+        # Delete user's verifications
+        db.query(Verification).filter(Verification.user_id == user.id).delete()
+        
+        # Finally, delete the user
+        db.delete(user)
+        db.commit()
+        
+        return {"message": "User deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user: {str(e)}"
+        )
 
 # Admin Dashboard Endpoints
 @app.get("/admin/dashboard/stats", response_model=dict)
