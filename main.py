@@ -5546,25 +5546,88 @@ async def delete_user_admin(
     
     try:
         # Delete related records first to avoid foreign key constraint errors
-        # Delete user's items
-        db.query(Item).filter(Item.owner_id == user.id).delete()
+        # Order matters: delete child records before parent records
         
-        # Delete user's yard sales
-        db.query(YardSale).filter(YardSale.owner_id == user.id).delete()
+        # Step 1: Delete messages in conversations (must be before conversations)
+        # Get all conversations the user is part of
+        user_conversations = db.query(Conversation).filter(
+            (Conversation.participant1_id == user.id) | (Conversation.participant2_id == user.id)
+        ).all()
+        conversation_ids = [conv.id for conv in user_conversations]
+        if conversation_ids:
+            db.query(Message).filter(Message.conversation_id.in_(conversation_ids)).delete()
         
-        # Delete user's comments
-        db.query(Comment).filter(Comment.user_id == user.id).delete()
-        db.query(MarketItemComment).filter(MarketItemComment.user_id == user.id).delete()
+        # Get all market item conversations the user is part of
+        user_market_conversations = db.query(MarketItemConversation).filter(
+            (MarketItemConversation.participant1_id == user.id) | (MarketItemConversation.participant2_id == user.id)
+        ).all()
+        market_conversation_ids = [conv.id for conv in user_market_conversations]
+        if market_conversation_ids:
+            db.query(MarketItemMessage).filter(MarketItemMessage.conversation_id.in_(market_conversation_ids)).delete()
         
-        # Delete user's messages and conversations
-        db.query(Message).filter(Message.sender_id == user.id).delete()
-        db.query(Message).filter(Message.recipient_id == user.id).delete()
-        db.query(MarketItemMessage).filter(MarketItemMessage.sender_id == user.id).delete()
-        db.query(MarketItemMessage).filter(MarketItemMessage.recipient_id == user.id).delete()
+        # Step 2: Get user's yard sales and items IDs first (needed for proper deletion order)
+        user_yard_sales = db.query(YardSale).filter(YardSale.owner_id == user.id).all()
+        yard_sale_ids = [ys.id for ys in user_yard_sales] if user_yard_sales else []
+        
+        user_items = db.query(Item).filter(Item.owner_id == user.id).all()
+        item_ids = [item.id for item in user_items] if user_items else []
+        
+        # Step 3: Delete comments on user's yard sales (must be before deleting yard sales)
+        if yard_sale_ids:
+            db.query(Comment).filter(Comment.yard_sale_id.in_(yard_sale_ids)).delete()
+        
+        # Step 4: Delete comments on user's items (must be before deleting items)
+        if item_ids:
+            db.query(MarketItemComment).filter(MarketItemComment.item_id.in_(item_ids)).delete()
+        
+        # Step 5: Delete conversations related to user's yard sales (must be before deleting yard sales)
+        if yard_sale_ids:
+            yard_conversations = db.query(Conversation).filter(Conversation.yard_sale_id.in_(yard_sale_ids)).all()
+            yard_conv_ids = [conv.id for conv in yard_conversations]
+            if yard_conv_ids:
+                db.query(Message).filter(Message.conversation_id.in_(yard_conv_ids)).delete()
+            db.query(Conversation).filter(Conversation.yard_sale_id.in_(yard_sale_ids)).delete()
+        
+        # Step 6: Delete conversations related to user's items (must be before deleting items)
+        if item_ids:
+            item_conversations = db.query(MarketItemConversation).filter(MarketItemConversation.item_id.in_(item_ids)).all()
+            item_conv_ids = [conv.id for conv in item_conversations]
+            if item_conv_ids:
+                db.query(MarketItemMessage).filter(MarketItemMessage.conversation_id.in_(item_conv_ids)).delete()
+            db.query(MarketItemConversation).filter(MarketItemConversation.item_id.in_(item_ids)).delete()
+        
+        # Step 7: Delete conversations where user is a participant (not related to user's yard sales/items)
         db.query(Conversation).filter(Conversation.participant1_id == user.id).delete()
         db.query(Conversation).filter(Conversation.participant2_id == user.id).delete()
         db.query(MarketItemConversation).filter(MarketItemConversation.participant1_id == user.id).delete()
         db.query(MarketItemConversation).filter(MarketItemConversation.participant2_id == user.id).delete()
+        
+        # Step 8: Delete comments made by user (not on user's yard sales/items - those are already deleted)
+        db.query(Comment).filter(Comment.user_id == user.id).delete()
+        db.query(MarketItemComment).filter(MarketItemComment.user_id == user.id).delete()
+        
+        # Step 9: Delete messages sent/received by user (standalone messages)
+        db.query(Message).filter(Message.sender_id == user.id).delete()
+        db.query(Message).filter(Message.recipient_id == user.id).delete()
+        db.query(MarketItemMessage).filter(MarketItemMessage.sender_id == user.id).delete()
+        db.query(MarketItemMessage).filter(MarketItemMessage.recipient_id == user.id).delete()
+        
+        # Step 10: Delete user's items (market items) - related records already deleted
+        if item_ids:
+            db.query(WatchedItem).filter(WatchedItem.item_id.in_(item_ids)).delete()
+        db.query(Item).filter(Item.owner_id == user.id).delete()
+        
+        # Step 11: Delete user's yard sales - related records already deleted
+        if yard_sale_ids:
+            # Delete ratings for user's yard sales
+            db.query(UserRating).filter(UserRating.yard_sale_id.in_(yard_sale_ids)).delete()
+            # Delete reports for user's yard sales
+            db.query(Report).filter(Report.reported_yard_sale_id.in_(yard_sale_ids)).delete()
+            # Delete visits for user's yard sales
+            db.query(VisitedYardSale).filter(VisitedYardSale.yard_sale_id.in_(yard_sale_ids)).delete()
+            # Delete notifications for user's yard sales
+            db.query(Notification).filter(Notification.related_yard_sale_id.in_(yard_sale_ids)).delete()
+        db.query(YardSale).filter(YardSale.owner_id == user.id).delete()
         
         # Delete user's ratings (both given and received)
         db.query(UserRating).filter(UserRating.reviewer_id == user.id).delete()
