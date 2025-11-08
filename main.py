@@ -3105,9 +3105,38 @@ async def delete_market_item(item_id: str, current_user: User = Depends(get_curr
     
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
-    db.delete(item)
-    db.commit()
-    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+    
+    try:
+        # Delete related records first to avoid foreign key constraint errors
+        # Delete item's comments
+        db.query(MarketItemComment).filter(MarketItemComment.item_id == item_id).delete()
+        
+        # Delete item's watched items
+        db.query(WatchedItem).filter(WatchedItem.item_id == item_id).delete()
+        
+        # Delete item's conversations and their messages
+        # First get all conversations for this item
+        conversations = db.query(MarketItemConversation).filter(MarketItemConversation.item_id == item_id).all()
+        conversation_ids = [conv.id for conv in conversations]
+        
+        # Delete messages in those conversations
+        if conversation_ids:
+            db.query(MarketItemMessage).filter(MarketItemMessage.conversation_id.in_(conversation_ids)).delete()
+        
+        # Delete the conversations
+        db.query(MarketItemConversation).filter(MarketItemConversation.item_id == item_id).delete()
+        
+        # Finally, delete the item
+        db.delete(item)
+        db.commit()
+        
+        return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete item: {str(e)}"
+        )
 
 # Yard Sale Endpoints
 @app.post("/yard-sales", response_model=YardSaleResponse, status_code=status.HTTP_201_CREATED)
@@ -3620,10 +3649,47 @@ async def delete_yard_sale(
             detail=f"Yard sale with id {yard_sale_id} not found"
         )
     
-    db.delete(yard_sale)
-    db.commit()
-    
-    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+    try:
+        # Delete related records first to avoid foreign key constraint errors
+        # Note: Comments and conversations have cascade delete, but we'll delete messages explicitly
+        
+        # Get all conversations for this yard sale
+        conversations = db.query(Conversation).filter(Conversation.yard_sale_id == yard_sale_id).all()
+        conversation_ids = [conv.id for conv in conversations]
+        
+        # Delete messages in those conversations
+        if conversation_ids:
+            db.query(Message).filter(Message.conversation_id.in_(conversation_ids)).delete()
+        
+        # Delete conversations (cascade should handle this, but being explicit)
+        db.query(Conversation).filter(Conversation.yard_sale_id == yard_sale_id).delete()
+        
+        # Delete comments (cascade should handle this, but being explicit)
+        db.query(Comment).filter(Comment.yard_sale_id == yard_sale_id).delete()
+        
+        # Delete yard sale's ratings
+        db.query(UserRating).filter(UserRating.yard_sale_id == yard_sale_id).delete()
+        
+        # Delete yard sale's reports
+        db.query(Report).filter(Report.reported_yard_sale_id == yard_sale_id).delete()
+        
+        # Delete yard sale's visits
+        db.query(VisitedYardSale).filter(VisitedYardSale.yard_sale_id == yard_sale_id).delete()
+        
+        # Delete notifications related to this yard sale
+        db.query(Notification).filter(Notification.related_yard_sale_id == yard_sale_id).delete()
+        
+        # Finally, delete the yard sale
+        db.delete(yard_sale)
+        db.commit()
+        
+        return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete yard sale: {str(e)}"
+        )
 
 @app.put("/yard-sales/{yard_sale_id}/featured-image", response_model=FeaturedImageResponse)
 async def set_featured_image(
