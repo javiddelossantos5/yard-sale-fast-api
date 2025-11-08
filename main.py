@@ -3198,10 +3198,19 @@ async def get_yard_sales(
     price_range: Optional[str] = None,
     status: Optional[YardSaleStatus] = None,
     include_visited_status: bool = False,
-    current_user: Optional[User] = Depends(get_current_active_user),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db)
 ):
     """Get all active yard sales with optional filtering"""
+    # Get optional current user for visited status
+    current_user = None
+    if authorization:
+        try:
+            current_user = get_optional_user_from_auth_header(authorization, db)
+        except Exception:
+            # If auth fails, continue without user
+            current_user = None
+    
     query = db.query(YardSale).filter(YardSale.is_active == True)
     
     # Apply filters
@@ -4772,6 +4781,43 @@ async def create_report(
     db.add(report)
     db.commit()
     db.refresh(report)
+    
+    # Notify all admins about the new report
+    try:
+        admins = db.query(User).filter(User.permissions == "admin").all()
+        
+        # Build notification message with report details
+        report_target = ""
+        if reported_user:
+            report_target = f"User: {reported_user.username}"
+        elif reported_yard_sale:
+            report_target = f"Yard Sale: {reported_yard_sale.title}"
+        else:
+            report_target = "Unknown target"
+        
+        notification_title = f"New {report_data.report_type} report"
+        notification_message = (
+            f"Report submitted by {current_user.username}.\n"
+            f"Target: {report_target}\n"
+            f"Description: {report_data.description[:200]}{'...' if len(report_data.description) > 200 else ''}"
+        )
+        
+        # Create notification for each admin
+        for admin in admins:
+            create_notification(
+                db=db,
+                user_id=admin.id,
+                notification_type="report",
+                title=notification_title,
+                message=notification_message,
+                related_user_id=current_user.id,  # The reporter
+                related_yard_sale_id=report_data.reported_yard_sale_id
+            )
+    except Exception as e:
+        # Don't fail report creation if notification fails
+        print(f"Error notifying admins about report: {e}")
+        import traceback
+        traceback.print_exc()
     
     return ReportResponse(
         id=report.id,
