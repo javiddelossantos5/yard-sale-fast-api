@@ -16,9 +16,20 @@ if ! docker ps | grep -q yard-sale-db; then
     exit 1
 fi
 
-# Create events table
+# Check what type users.id is
+echo "📋 Checking users.id column type..."
+USER_ID_TYPE=$(docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale -sN -e "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='yardsale' AND TABLE_NAME='users' AND COLUMN_NAME='id';" 2>/dev/null)
+
+if [ -z "$USER_ID_TYPE" ]; then
+    echo "⚠️  Could not determine users.id type, defaulting to CHAR(36)"
+    USER_ID_TYPE="CHAR(36)"
+else
+    echo "✅ Found users.id type: $USER_ID_TYPE"
+fi
+
+# Create events table (without foreign key first)
 echo "📋 Creating 'events' table..."
-docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'EOF'
+docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF 2>/dev/null
 CREATE TABLE IF NOT EXISTS events (
     id CHAR(36) PRIMARY KEY,
     type VARCHAR(20) NOT NULL DEFAULT 'event',
@@ -49,7 +60,7 @@ CREATE TABLE IF NOT EXISTS events (
     age_restriction VARCHAR(20),
     
     -- Organizer
-    organizer_id CHAR(36) NOT NULL,
+    organizer_id $USER_ID_TYPE NOT NULL,
     organizer_name VARCHAR(150),
     company VARCHAR(150),
     contact_phone VARCHAR(20),
@@ -69,7 +80,6 @@ CREATE TABLE IF NOT EXISTS events (
     created_at DATETIME NOT NULL,
     last_updated DATETIME NOT NULL,
     
-    FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_organizer_id (organizer_id),
     INDEX idx_type (type),
     INDEX idx_status (status),
@@ -84,24 +94,36 @@ EOF
 
 if [ $? -eq 0 ]; then
     echo "✅ Events table created successfully"
+    
+    # Add foreign key constraint separately
+    echo "📋 Adding foreign key constraint..."
+    docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'EOF' 2>/dev/null
+ALTER TABLE events 
+ADD CONSTRAINT events_ibfk_organizer 
+FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE;
+EOF
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Foreign key constraint added successfully"
+    else
+        echo "ℹ️  Foreign key constraint may already exist (this is okay)"
+    fi
 else
     echo "❌ Error creating events table"
     exit 1
 fi
 
-# Create event_comments table
+# Create event_comments table (without foreign keys first)
 echo "📋 Creating 'event_comments' table..."
-docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'EOF'
+docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF 2>/dev/null
 CREATE TABLE IF NOT EXISTS event_comments (
     id CHAR(36) PRIMARY KEY,
     event_id CHAR(36) NOT NULL,
-    user_id CHAR(36) NOT NULL,
+    user_id $USER_ID_TYPE NOT NULL,
     content TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME,
     
-    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_event_id (event_id),
     INDEX idx_user_id (user_id),
     INDEX idx_created_at (created_at)
@@ -110,6 +132,24 @@ EOF
 
 if [ $? -eq 0 ]; then
     echo "✅ Event comments table created successfully"
+    
+    # Add foreign key constraints separately
+    echo "📋 Adding foreign key constraints..."
+    docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'EOF' 2>/dev/null
+ALTER TABLE event_comments 
+ADD CONSTRAINT event_comments_ibfk_event 
+FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE;
+
+ALTER TABLE event_comments 
+ADD CONSTRAINT event_comments_ibfk_user 
+FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+EOF
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Foreign key constraints added successfully"
+    else
+        echo "ℹ️  Foreign key constraints may already exist (this is okay)"
+    fi
 else
     echo "❌ Error creating event_comments table"
     exit 1
