@@ -987,6 +987,7 @@ class MarketItemResponse(BaseModel):
     owner_id: str
     owner_username: str
     owner_is_admin: bool = False  # Whether the owner has admin permissions
+    owner_profile_picture: Optional[str] = None  # Profile picture of the owner
     is_watched: Optional[bool] = None
     # Price reduction tracking
     original_price: Optional[float] = None
@@ -1007,6 +1008,7 @@ class MarketItemCommentResponse(BaseModel):
     user_id: str
     username: str
     user_is_admin: bool = False
+    user_profile_picture: Optional[str] = None  # Profile picture of the commenter
     item_id: str
 
 # Market Item Messaging Models
@@ -1023,6 +1025,7 @@ class MarketItemMessageResponse(BaseModel):
     sender_id: str
     sender_username: str
     sender_is_admin: bool = False
+    sender_profile_picture: Optional[str] = None  # Profile picture of the sender
     recipient_id: str
     recipient_username: str
 
@@ -1070,6 +1073,7 @@ class YardSaleMessageResponse(BaseModel):
     sender_id: str
     sender_username: str
     sender_is_admin: bool = False
+    sender_profile_picture: Optional[str] = None  # Profile picture of the sender
     recipient_id: str
     recipient_username: str
     yard_sale_id: str
@@ -1186,6 +1190,7 @@ class YardSaleResponse(BaseModel):
     owner_id: str
     owner_username: str
     owner_is_admin: bool = False  # Whether the owner has admin permissions
+    owner_profile_picture: Optional[str] = None  # Profile picture of the owner
     comment_count: int = 0
     is_visited: Optional[bool] = None
     visit_count: Optional[int] = None
@@ -1203,6 +1208,7 @@ class CommentResponse(BaseModel):
     user_id: str
     username: str
     user_is_admin: bool = False
+    user_profile_picture: Optional[str] = None  # Profile picture of the commenter
     yard_sale_id: str
 
 # Message Models
@@ -1238,6 +1244,7 @@ class MessageResponse(BaseModel):
     sender_id: str
     sender_username: str
     sender_is_admin: bool = False
+    sender_profile_picture: Optional[str] = None  # Profile picture of the sender
     recipient_id: str
     recipient_username: str
     notification_id: Optional[str] = None  # NEW: Link to notification
@@ -1257,8 +1264,10 @@ class UserRatingResponse(BaseModel):
     created_at: datetime
     reviewer_id: str
     reviewer_username: str
+    reviewer_profile_picture: Optional[str] = None  # Profile picture of the reviewer
     rated_user_id: str
     rated_user_username: str
+    rated_user_profile_picture: Optional[str] = None  # Profile picture of the rated user
     yard_sale_id: Optional[str]
     yard_sale_title: Optional[str]
 
@@ -2042,6 +2051,7 @@ async def create_market_item(item: MarketItemCreate, current_user: User = Depend
         owner_id=str(db_item.owner_id),
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
+        owner_profile_picture=current_user.profile_picture,
         is_watched=None,
         **price_reduction
     )
@@ -2331,6 +2341,7 @@ async def list_market_items(
                     owner_id=str(i.owner_id),
                     owner_username=owner_username,
                     owner_is_admin=owner_is_admin,
+                    owner_profile_picture=i.owner.profile_picture if i.owner else None,
                     is_watched=(i.id in watched_ids) if current_user else None,
                     original_price=original_price,
                     last_price_change_date=last_price_change_date,
@@ -2399,6 +2410,7 @@ async def get_market_item_conversations(
                 sender_id=last_msg.sender_id,
                 sender_username=sender.username if sender else "unknown",
                 sender_is_admin=(sender.permissions == "admin") if sender else False,
+                sender_profile_picture=sender.profile_picture if sender else None,
                 recipient_id=last_msg.recipient_id,
                 recipient_username=recipient.username if recipient else "unknown"
             )
@@ -2478,6 +2490,7 @@ async def send_market_item_conversation_message(
         sender_id=current_user.id,
         sender_username=current_user.username,
         sender_is_admin=(current_user.permissions == "admin"),
+        sender_profile_picture=current_user.profile_picture,
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown"
     )
@@ -2516,6 +2529,7 @@ async def get_market_item_conversation_messages(
             sender_id=msg.sender_id,
             sender_username=sender.username if sender else "unknown",
             sender_is_admin=(sender.permissions == "admin") if sender else False,
+            sender_profile_picture=sender.profile_picture if sender else None,
             recipient_id=msg.recipient_id,
             recipient_username=recipient.username if recipient else "unknown"
         ))
@@ -2629,6 +2643,7 @@ async def send_market_item_message(
         sender_id=current_user.id,
         sender_username=current_user.username,
         sender_is_admin=(current_user.permissions == "admin"),
+        sender_profile_picture=current_user.profile_picture,
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown"
     )
@@ -2672,6 +2687,7 @@ async def get_market_item_messages(
             sender_id=msg.sender_id,
             sender_username=sender.username if sender else "unknown",
             sender_is_admin=(sender.permissions == "admin") if sender else False,
+            sender_profile_picture=sender.profile_picture if sender else None,
             recipient_id=msg.recipient_id,
             recipient_username=recipient.username if recipient else "unknown"
         ))
@@ -2899,6 +2915,7 @@ async def get_market_item(item_id: str, authorization: Optional[str] = Header(No
             owner_id=str(item.owner_id),
             owner_username=owner_username,
             owner_is_admin=owner_is_admin,
+            owner_profile_picture=item.owner.profile_picture if item.owner else None,
             is_watched=is_watched,
             **price_reduction
         )
@@ -2936,6 +2953,7 @@ async def create_market_item_comment(
         user_id=current_user.id,
         username=current_user.username,
         user_is_admin=(current_user.permissions == "admin"),
+        user_profile_picture=current_user.profile_picture,
         item_id=item_id
     )
 
@@ -2957,7 +2975,8 @@ async def get_market_item_comments(item_id: str, db: Session = Depends(get_db)):
             user_id=c.user_id,
             username=user.username if user else "",
             user_is_admin=(user.permissions == "admin") if user else False,
-            item_id=item_id
+            user_profile_picture=user.profile_picture if user else None,
+            item_id=c.item_id
         ))
     return result
 
@@ -3068,6 +3087,7 @@ async def get_watched_items(
             owner_id=str(item.owner_id),
             owner_username=owner_username,
             owner_is_admin=owner_is_admin,
+            owner_profile_picture=item.owner.profile_picture if item.owner else None,
             is_watched=True,  # Always true since these are from watchlist
             **price_reduction
         ))
@@ -3163,6 +3183,7 @@ async def update_market_item(item_id: str, update: MarketItemUpdate, current_use
         owner_id=str(item.owner_id),
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
+        owner_profile_picture=current_user.profile_picture,
         is_watched=None,
         **price_reduction
     )
@@ -3257,6 +3278,7 @@ async def create_yard_sale(yard_sale: YardSaleCreate, current_user: User = Depen
         **db_yard_sale.__dict__,
         owner_username=current_user.username,
         owner_is_admin=owner_is_admin,
+        owner_profile_picture=current_user.profile_picture,
         comment_count=comment_count
     )
 
@@ -3335,6 +3357,7 @@ async def get_yard_sales(
             **yard_sale.__dict__,
             owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
             owner_is_admin=owner_is_admin,
+            owner_profile_picture=yard_sale.owner.profile_picture if yard_sale.owner else None,
             comment_count=comment_count,
             is_visited=is_visited,
             visit_count=visit_count,
@@ -3423,6 +3446,7 @@ async def send_yard_sale_message(
         sender_id=current_user.id,
         sender_username=current_user.username,
         sender_is_admin=(current_user.permissions == "admin"),
+        sender_profile_picture=current_user.profile_picture,
         recipient_id=recipient_id,
         recipient_username=recipient.username if recipient else "unknown",
         yard_sale_id=yard_sale_id
@@ -3469,6 +3493,7 @@ async def get_yard_sale_conversations(
                 sender_id=last_msg.sender_id,
                 sender_username=sender.username if sender else "unknown",
                 sender_is_admin=(sender.permissions == "admin") if sender else False,
+                sender_profile_picture=sender.profile_picture if sender else None,
                 recipient_id=last_msg.recipient_id,
                 recipient_username=recipient.username if recipient else "unknown",
                 yard_sale_id=conv.yard_sale_id
@@ -3536,6 +3561,7 @@ async def get_yard_sale_conversation_messages(
             sender_id=msg.sender_id,
             sender_username=sender.username if sender else "unknown",
             sender_is_admin=(sender.permissions == "admin") if sender else False,
+            sender_profile_picture=sender.profile_picture if sender else None,
             recipient_id=msg.recipient_id,
             recipient_username=recipient.username if recipient else "unknown",
             yard_sale_id=conversation.yard_sale_id
@@ -3658,6 +3684,7 @@ async def get_yard_sale(yard_sale_id: str, db: Session = Depends(get_db)):
         **yard_sale.__dict__,
         owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
         owner_is_admin=owner_is_admin,
+        owner_profile_picture=yard_sale.owner.profile_picture if yard_sale.owner else None,
         comment_count=comment_count
     )
 
@@ -3706,6 +3733,7 @@ async def update_yard_sale(
         **yard_sale.__dict__,
         owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
         owner_is_admin=owner_is_admin,
+        owner_profile_picture=yard_sale.owner.profile_picture if yard_sale.owner else None,
         comment_count=comment_count
     )
 
@@ -3967,6 +3995,7 @@ async def search_nearby_yard_sales(
             **yard_sale.__dict__,
             owner_username=yard_sale.owner.username if yard_sale.owner else "unknown",
             owner_is_admin=owner_is_admin,
+            owner_profile_picture=yard_sale.owner.profile_picture if yard_sale.owner else None,
             comment_count=comment_count
         ))
     
@@ -4002,7 +4031,8 @@ async def create_comment(
     return CommentResponse(
         **db_comment.__dict__,
         username=current_user.username,
-        user_is_admin=(current_user.permissions == "admin")
+        user_is_admin=(current_user.permissions == "admin"),
+        user_profile_picture=current_user.profile_picture
     )
 
 @app.get("/yard-sales/{yard_sale_id}/comments", response_model=List[CommentResponse])
@@ -4023,7 +4053,8 @@ async def get_comments(yard_sale_id: str, db: Session = Depends(get_db)):
     return [CommentResponse(
         **comment.__dict__, 
         username=comment.user.username,
-        user_is_admin=(comment.user.permissions == "admin")
+        user_is_admin=(comment.user.permissions == "admin"),
+        user_profile_picture=comment.user.profile_picture
     ) for comment in comments]
 
 @app.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -4222,6 +4253,7 @@ async def get_conversation_messages(
             sender_id=message.sender_id,
             sender_username=sender.username,
             sender_is_admin=(sender.permissions == "admin"),
+            sender_profile_picture=sender.profile_picture if sender else None,
             recipient_id=message.recipient_id,
             recipient_username=recipient.username
         ))
@@ -4291,6 +4323,7 @@ async def send_conversation_message(
         sender_id=message.sender_id,
         sender_username=current_user.username,
         sender_is_admin=(current_user.permissions == "admin"),
+        sender_profile_picture=current_user.profile_picture,
         recipient_id=message.recipient_id,
         recipient_username=recipient.username
     )
@@ -4341,6 +4374,7 @@ async def get_user_messages(
             sender_id=message.sender_id,
             sender_username=sender.username,
             sender_is_admin=(sender.permissions == "admin"),
+            sender_profile_picture=sender.profile_picture if sender else None,
             recipient_id=message.recipient_id,
             recipient_username=recipient.username,
             notification_id=notification_id,
@@ -4676,8 +4710,10 @@ async def create_user_rating(
         created_at=rating.created_at,
         reviewer_id=rating.reviewer_id,
         reviewer_username=current_user.username,
+        reviewer_profile_picture=current_user.profile_picture,
         rated_user_id=rating.rated_user_id,
         rated_user_username=rated_user.username,
+        rated_user_profile_picture=rated_user.profile_picture,
         yard_sale_id=rating.yard_sale_id,
         yard_sale_title=yard_sale.title if yard_sale else None
     )
@@ -4708,8 +4744,10 @@ async def get_user_ratings(
             created_at=rating.created_at,
             reviewer_id=rating.reviewer_id,
             reviewer_username=rating.reviewer.username,
+            reviewer_profile_picture=rating.reviewer.profile_picture if rating.reviewer else None,
             rated_user_id=rating.rated_user_id,
             rated_user_username=rating.rated_user.username,
+            rated_user_profile_picture=rating.rated_user.profile_picture if rating.rated_user else None,
             yard_sale_id=rating.yard_sale_id,
             yard_sale_title=yard_sale.title if yard_sale else None
         ))
@@ -4743,8 +4781,10 @@ async def get_user_ratings_by_id(
             created_at=rating.created_at,
             reviewer_id=rating.reviewer_id,
             reviewer_username=rating.reviewer.username,
+            reviewer_profile_picture=rating.reviewer.profile_picture if rating.reviewer else None,
             rated_user_id=rating.rated_user_id,
             rated_user_username=rating.rated_user.username,
+            rated_user_profile_picture=rating.rated_user.profile_picture if rating.rated_user else None,
             yard_sale_id=rating.yard_sale_id,
             yard_sale_title=yard_sale.title if yard_sale else None
         ))
@@ -5138,8 +5178,10 @@ async def create_rating(
         created_at=rating.created_at,
         reviewer_id=rating.reviewer_id,
         reviewer_username=current_user.username,
+        reviewer_profile_picture=current_user.profile_picture,
         rated_user_id=rating.rated_user_id,
         rated_user_username=rated_user.username,
+        rated_user_profile_picture=rated_user.profile_picture,
         yard_sale_id=rating.yard_sale_id,
         yard_sale_title=yard_sale.title if yard_sale else None
     )
@@ -5873,6 +5915,7 @@ async def get_all_items_admin(
                 "owner_id": str(item.owner_id),
                 "owner_username": owner.username if owner else "unknown",
                 "owner_is_admin": owner.permissions == "admin" if owner else False,
+                "owner_profile_picture": owner.profile_picture if owner else None,
                 "comment_count": comment_count,
                 "created_at": item.created_at.isoformat() if item.created_at else None
             })
@@ -5924,6 +5967,7 @@ async def get_all_yard_sales_admin(
                 "owner_id": str(yard_sale.owner_id),
                 "owner_username": owner.username if owner else "unknown",
                 "owner_is_admin": owner.permissions == "admin" if owner else False,
+                "owner_profile_picture": owner.profile_picture if owner else None,
                 "comment_count": comment_count,
                 "created_at": yard_sale.created_at.isoformat() if yard_sale.created_at else None,
                 "start_date": yard_sale.start_date.isoformat() if yard_sale.start_date else None
