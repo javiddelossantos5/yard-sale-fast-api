@@ -6112,6 +6112,175 @@ async def get_event_comments(
     
     return result
 
+# Event Featured Image Endpoints
+@app.put("/events/{event_id}/featured-image", response_model=FeaturedImageResponse)
+async def set_event_featured_image(
+    event_id: str,
+    request: Request,
+    featured_request: SetFeaturedImageRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Set the featured image for an event (organizer only, or admin can edit any event)"""
+    # Allow admins to edit any event, otherwise only organizer can edit
+    if current_user.permissions == "admin":
+        event = db.query(Event).filter(Event.id == event_id).first()
+    else:
+        event = db.query(Event).filter(
+            Event.id == event_id,
+            Event.organizer_id == current_user.id
+        ).first()
+    
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found or you don't have permission"
+        )
+    
+    featured_image_url = None
+    
+    # Determine base URL for image URLs
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    origin = request.headers.get("Origin")
+    
+    if forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+    elif origin:
+        base_url = origin.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+    
+    # Method 1: Use provided image_url directly
+    if featured_request.image_url:
+        featured_image_url = featured_request.image_url
+    
+    # Method 2: Use image_key to generate URL
+    elif featured_request.image_key:
+        featured_image_url = f"{base_url}/image-proxy/{featured_request.image_key}"
+    
+    # Method 3: Use photo_index to get from gallery_urls array
+    elif featured_request.photo_index is not None:
+        if event.gallery_urls and isinstance(event.gallery_urls, list):
+            if 0 <= featured_request.photo_index < len(event.gallery_urls):
+                featured_image_url = event.gallery_urls[featured_request.photo_index]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Photo index {featured_request.photo_index} is out of range. Event has {len(event.gallery_urls)} images in gallery."
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Event has no gallery images to select from"
+            )
+    
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either image_url, image_key, or photo_index"
+        )
+    
+    # Update the featured image
+    event.featured_image = featured_image_url
+    event.last_updated = get_mountain_time()
+    db.commit()
+    db.refresh(event)
+    
+    return FeaturedImageResponse(
+        success=True,
+        message="Featured image set successfully",
+        featured_image=featured_image_url
+    )
+
+@app.delete("/events/{event_id}/featured-image", response_model=FeaturedImageResponse)
+async def remove_event_featured_image(
+    event_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Remove the featured image from an event (organizer only, or admin can edit any event)"""
+    # Allow admins to edit any event, otherwise only organizer can edit
+    if current_user.permissions == "admin":
+        event = db.query(Event).filter(Event.id == event_id).first()
+    else:
+        event = db.query(Event).filter(
+            Event.id == event_id,
+            Event.organizer_id == current_user.id
+        ).first()
+    
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found or you don't have permission"
+        )
+    
+    event.featured_image = None
+    event.last_updated = get_mountain_time()
+    db.commit()
+    
+    return FeaturedImageResponse(
+        success=True,
+        message="Featured image removed successfully",
+        featured_image=None
+    )
+
+@app.get("/events/{event_id}/images", response_model=dict)
+async def get_event_images(
+    event_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all images for an event (authenticated users only)"""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Determine base URL for image URLs
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    origin = request.headers.get("Origin")
+    
+    if forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host.split(',')[0].strip()}"
+    elif origin:
+        base_url = origin.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+    
+    # Get images from MinIO
+    try:
+        images = []
+        paginator = s3_client.get_paginator('list_objects_v2')
+        user_folder = f"images/{current_user.id}/"
+        
+        for page in paginator.paginate(Bucket=MINIO_BUCKET_NAME, Prefix=user_folder):
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    key = obj['Key']
+                    if key.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                        image_url = f"{base_url}/image-proxy/{key}"
+                        images.append({
+                            "key": key,
+                            "url": image_url,
+                            "size": obj['Size'],
+                            "last_modified": obj['LastModified'].isoformat() if obj.get('LastModified') else None,
+                            "filename": key.split('/')[-1]
+                        })
+        
+        return {
+            "images": images,
+            "total": len(images),
+            "event_gallery_urls": event.gallery_urls if event.gallery_urls else [],
+            "featured_image": event.featured_image
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load images: {str(e)}"
+        )
+
 # Admin-only endpoints
 @app.get("/admin/users", response_model=dict)
 async def get_all_users(
