@@ -60,6 +60,9 @@ class User(Base):
     state = Column(String(2), nullable=True)
     zip_code = Column(String(10), nullable=True)
     
+    # Profile picture
+    profile_picture = Column(String(500), nullable=True)  # URL to profile picture (optional)
+    
     # Account status
     is_active = Column(Boolean, default=True)
     permissions = Column(String(20), default="user", nullable=False)  # "user", "admin", "moderator"

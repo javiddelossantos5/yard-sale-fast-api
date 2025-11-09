@@ -111,7 +111,7 @@ s3_config = Config(
     signature_version='s3v4',
     retries={'max_attempts': 3, 'mode': 'standard'}
 )
-    
+
 # Initialize S3 client for MinIO
 # boto3 automatically handles HTTP vs HTTPS based on the endpoint URL
 # For HTTP endpoints (like http://10.1.2.165:9001), no SSL is used
@@ -801,10 +801,21 @@ class UserResponse(UserBase):
     state: Optional[str]
     zip_code: Optional[str]
     bio: Optional[str]
+    profile_picture: Optional[str] = None  # URL to profile picture (optional)
     is_active: bool
     permissions: UserPermission
     created_at: datetime
     updated_at: datetime
+
+class UserUpdate(BaseModel):
+    """Model for users to update their own profile"""
+    full_name: Optional[str] = Field(None, max_length=100)
+    phone_number: Optional[str] = Field(None, max_length=20)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=2)
+    zip_code: Optional[str] = Field(None, max_length=10)
+    bio: Optional[str] = Field(None, max_length=1000)
+    profile_picture: Optional[str] = Field(None, max_length=500, description="URL to profile picture (optional)")
 
 class UserLogin(BaseModel):
     username: str = Field(..., description="Username or email")
@@ -1261,6 +1272,7 @@ class UserProfileResponse(BaseModel):
     state: Optional[str]
     zip_code: Optional[str]
     bio: Optional[str]
+    profile_picture: Optional[str] = None  # URL to profile picture (optional)
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -1718,6 +1730,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         state=db_user.state,
         zip_code=db_user.zip_code,
         bio=db_user.bio,
+        profile_picture=db_user.profile_picture,
         is_active=db_user.is_active,
         permissions=UserPermission(db_user.permissions),
         created_at=db_user.created_at,
@@ -1816,6 +1829,66 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
         state=current_user.state,
         zip_code=current_user.zip_code,
         bio=current_user.bio,
+        profile_picture=current_user.profile_picture,
+        is_active=current_user.is_active,
+        permissions=UserPermission(current_user.permissions),
+        created_at=current_user.created_at,
+        updated_at=current_user.updated_at
+    )
+
+@app.put("/me", response_model=UserResponse)
+async def update_user_profile(
+    user_update: UserUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Update current user's profile"""
+    # Update fields if provided (handle empty strings as None)
+    if user_update.full_name is not None:
+        value = user_update.full_name.strip() if isinstance(user_update.full_name, str) else user_update.full_name
+        current_user.full_name = value if value else None
+    if user_update.phone_number is not None:
+        value = user_update.phone_number.strip() if isinstance(user_update.phone_number, str) else user_update.phone_number
+        current_user.phone_number = value if value else None
+    if user_update.city is not None:
+        value = user_update.city.strip() if isinstance(user_update.city, str) else user_update.city
+        current_user.city = value if value else None
+    if user_update.state is not None:
+        value = user_update.state.strip() if isinstance(user_update.state, str) else user_update.state
+        current_user.state = value if value else None
+    if user_update.zip_code is not None:
+        value = user_update.zip_code.strip() if isinstance(user_update.zip_code, str) else user_update.zip_code
+        current_user.zip_code = value if value else None
+    if user_update.bio is not None:
+        value = user_update.bio.strip() if isinstance(user_update.bio, str) else user_update.bio
+        current_user.bio = value if value else None
+    if user_update.profile_picture is not None:
+        value = user_update.profile_picture.strip() if isinstance(user_update.profile_picture, str) else user_update.profile_picture
+        current_user.profile_picture = value if value else None
+    
+    current_user.updated_at = get_mountain_time()
+    
+    try:
+        db.commit()
+        db.refresh(current_user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update profile: {str(e)}"
+        )
+    
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        phone_number=current_user.phone_number,
+        city=current_user.city,
+        state=current_user.state,
+        zip_code=current_user.zip_code,
+        bio=current_user.bio,
+        profile_picture=current_user.profile_picture,
         is_active=current_user.is_active,
         permissions=UserPermission(current_user.permissions),
         created_at=current_user.created_at,
@@ -4699,6 +4772,7 @@ async def get_user_by_id(
         state=user.state,
         zip_code=user.zip_code,
         bio=user.bio,
+        profile_picture=user.profile_picture,
         is_active=user.is_active,
         permissions=UserPermission(user.permissions),
         created_at=user.created_at,
@@ -4738,6 +4812,7 @@ async def get_user_profile(
         state=user.state,
         zip_code=user.zip_code,
         bio=user.bio,
+        profile_picture=user.profile_picture,
         is_active=user.is_active,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -4960,6 +5035,7 @@ async def get_user_by_id(
         state=user.state,
         zip_code=user.zip_code,
         bio=user.bio,
+        profile_picture=user.profile_picture,
         is_active=user.is_active,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -5438,6 +5514,7 @@ async def get_all_users(
             state=user.state,
             zip_code=user.zip_code,
             bio=user.bio,
+            profile_picture=user.profile_picture,
             is_active=user.is_active,
             permissions=UserPermission(user.permissions),
             created_at=user.created_at,
@@ -5480,6 +5557,7 @@ async def get_user_by_id_admin(
         state=user.state,
         zip_code=user.zip_code,
         bio=user.bio,
+        profile_picture=user.profile_picture,
         is_active=user.is_active,
         permissions=UserPermission(user.permissions),
         created_at=user.created_at,
@@ -5494,6 +5572,7 @@ class UserUpdateAdmin(BaseModel):
     state: Optional[str] = Field(None, max_length=2)
     zip_code: Optional[str] = Field(None, max_length=10)
     bio: Optional[str] = Field(None, max_length=1000)
+    profile_picture: Optional[str] = Field(None, max_length=500, description="URL to profile picture (optional)")
     is_active: Optional[bool] = None
     permissions: Optional[str] = Field(None, description="User permission level: 'user', 'moderator', or 'admin'")
     
@@ -5538,6 +5617,9 @@ async def update_user_admin(
     if user_update.bio is not None:
         value = user_update.bio.strip() if isinstance(user_update.bio, str) else user_update.bio
         user.bio = value if value else None
+    if user_update.profile_picture is not None:
+        value = user_update.profile_picture.strip() if isinstance(user_update.profile_picture, str) else user_update.profile_picture
+        user.profile_picture = value if value else None
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
     if user_update.permissions is not None:
@@ -5566,6 +5648,7 @@ async def update_user_admin(
         state=user.state,
         zip_code=user.zip_code,
         bio=user.bio,
+        profile_picture=user.profile_picture,
         is_active=user.is_active,
         permissions=UserPermission(user.permissions),
         created_at=user.created_at,
