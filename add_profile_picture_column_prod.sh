@@ -5,21 +5,66 @@
 
 set -e  # Exit on error
 
-CONTAINER_NAME="fast-api-test-db-1"  # Adjust if your container name is different
-DATABASE_NAME="yardsale"  # Adjust if your database name is different
+# Get the directory where the script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Try to detect container name from docker-compose.yml
+if [ -f "docker-compose.yml" ]; then
+    # Extract container_name from docker-compose.yml for db service
+    CONTAINER_NAME=$(grep -A 20 "^  db:" docker-compose.yml | grep "container_name:" | awk '{print $2}' | tr -d '"' || echo "")
+    
+    # If not found, try to get it from running containers
+    if [ -z "$CONTAINER_NAME" ]; then
+        CONTAINER_NAME=$(docker-compose ps -q db 2>/dev/null | xargs docker inspect --format '{{.Name}}' 2>/dev/null | sed 's/\///' || echo "")
+    fi
+fi
+
+# Fallback: try common container names
+if [ -z "$CONTAINER_NAME" ]; then
+    # Check for mysql-db (from docker-compose.yml)
+    if docker ps --format '{{.Names}}' | grep -q "^mysql-db$"; then
+        CONTAINER_NAME="mysql-db"
+    # Check for fast-api-test-db-1 (old naming)
+    elif docker ps --format '{{.Names}}' | grep -q "^fast-api-test-db-1$"; then
+        CONTAINER_NAME="fast-api-test-db-1"
+    # Try to find any mysql container
+    else
+        CONTAINER_NAME=$(docker ps --format '{{.Names}}' | grep -i mysql | head -1 || echo "")
+    fi
+fi
+
+# Database credentials (from docker-compose.yml)
+DATABASE_NAME="fastapi_db"  # From docker-compose.yml
 MYSQL_USER="root"
-MYSQL_PASSWORD="supersecretpassword"  # Adjust to match your MySQL password
+MYSQL_PASSWORD="password"  # From docker-compose.yml MYSQL_ROOT_PASSWORD
 
 echo "🚀 Adding profile_picture column to users table (production)..."
 echo ""
 
 # Check if container is running
+if [ -z "$CONTAINER_NAME" ]; then
+    echo "❌ Error: Could not find MySQL container"
+    echo "   Please make sure docker-compose is running:"
+    echo "   docker-compose up -d"
+    echo ""
+    echo "   Available containers:"
+    docker ps --format "   - {{.Names}}" || echo "   (no containers running)"
+    exit 1
+fi
+
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     echo "❌ Error: Docker container '${CONTAINER_NAME}' is not running"
     echo "   Please start the container first:"
     echo "   docker-compose up -d"
+    echo ""
+    echo "   Available containers:"
+    docker ps --format "   - {{.Names}}" || echo "   (no containers running)"
     exit 1
 fi
+
+echo "✅ Found MySQL container: ${CONTAINER_NAME}"
+echo ""
 
 echo "🔍 Checking if profile_picture column already exists..."
 
