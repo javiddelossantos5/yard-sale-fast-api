@@ -1361,7 +1361,7 @@ class EventCreate(BaseModel):
     
     # Pricing
     price: Optional[float] = Field(None, ge=0, description="Price for paid events, entrance fees, or vendor booth costs")
-    is_free: bool = Field(default=True, description="Quick filter toggle for 'free events only'")
+    is_free: bool = Field(default=False, description="Quick filter toggle for 'free events only'")
     
     # Filtering & Search
     tags: Optional[List[str]] = Field(None, description="List of tags for filtering and search (e.g., ['kids', 'music', 'outdoor'])")
@@ -1453,7 +1453,7 @@ class EventResponse(BaseModel):
     
     # Pricing
     price: Optional[float] = None
-    is_free: bool = True
+    is_free: bool = False
     
     # Filtering & Search
     tags: Optional[List[str]] = None

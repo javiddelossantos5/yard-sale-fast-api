@@ -442,7 +442,7 @@ class Event(Base):
     
     # Pricing
     price = Column(Numeric(10, 2), nullable=True)  # For paid events, entrance fees, vendor booth costs
-    is_free = Column(Boolean, default=True, nullable=False)  # Quick filter for "free events only"
+    is_free = Column(Boolean, default=False, nullable=False)  # Quick filter for "free events only"
     
     # Filtering & Search
     tags = Column(JSON, nullable=True)  # List of short strings for filtering/search (e.g., ["kids", "music", "outdoor"])
