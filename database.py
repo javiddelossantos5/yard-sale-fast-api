@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Date, Time, JSON, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Date, Time, JSON, UniqueConstraint, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.dialects.mysql import CHAR
@@ -90,6 +90,9 @@ class User(Base):
     
     # Notification relationships
     notifications = relationship("Notification", foreign_keys="Notification.user_id", back_populates="user")
+    
+    # Events relationships
+    events_organized = relationship("Event", back_populates="organizer")
 
 class Item(Base):
     __tablename__ = "items"
@@ -411,6 +414,78 @@ class Notification(Base):
     related_user = relationship("User", foreign_keys=[related_user_id])
     related_yard_sale = relationship("YardSale", foreign_keys=[related_yard_sale_id])
     related_message = relationship("Message", foreign_keys=[related_message_id])
+
+class Event(Base):
+    __tablename__ = "events"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    
+    # Basic Information
+    type = Column(String(20), nullable=False, default="event")  # 'event', 'informational', 'advertisement', 'announcement', 'lost_found', 'request_help', 'offer_help', 'service_offer'
+    title = Column(String(150), nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(String(50), nullable=True)
+    status = Column(String(20), default="upcoming", nullable=False)  # 'upcoming', 'ongoing', 'ended', 'cancelled'
+    is_public = Column(Boolean, default=True, nullable=False)
+    
+    # Location & Time
+    address = Column(String(255), nullable=True)
+    city = Column(String(100), nullable=True)
+    state = Column(String(100), nullable=True)
+    zip = Column(String(10), nullable=True)
+    location_type = Column(String(20), nullable=True)  # 'indoor', 'outdoor', 'virtual'
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    start_time = Column(Time, nullable=True)
+    end_time = Column(Time, nullable=True)
+    timezone = Column(String(50), nullable=True)
+    
+    # Pricing
+    price = Column(Numeric(10, 2), nullable=True)  # For paid events, entrance fees, vendor booth costs
+    is_free = Column(Boolean, default=True, nullable=False)  # Quick filter for "free events only"
+    
+    # Filtering & Search
+    tags = Column(JSON, nullable=True)  # List of short strings for filtering/search (e.g., ["kids", "music", "outdoor"])
+    age_restriction = Column(String(20), nullable=True)  # "all", "18+", "21+", etc.
+    
+    # Organizer
+    organizer_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    organizer_name = Column(String(150), nullable=True)
+    company = Column(String(150), nullable=True)
+    contact_phone = Column(String(20), nullable=True)
+    contact_email = Column(String(150), nullable=True)
+    facebook_url = Column(String(255), nullable=True)
+    instagram_url = Column(String(255), nullable=True)
+    website = Column(String(255), nullable=True)
+    
+    # Engagement
+    comments_enabled = Column(Boolean, default=True, nullable=False)
+    
+    # Media
+    gallery_urls = Column(JSON, nullable=True)
+    featured_image = Column(String(500), nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime, default=get_mountain_time)
+    last_updated = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Relationships
+    organizer = relationship("User", back_populates="events_organized")
+    comments = relationship("EventComment", back_populates="event", cascade="all, delete-orphan")
+
+class EventComment(Base):
+    __tablename__ = "event_comments"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    event_id = Column(CHAR(36), ForeignKey("events.id"), nullable=False)
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Relationships
+    event = relationship("Event", back_populates="comments")
+    user = relationship("User")
 
 # Dependency to get database session
 def get_db():

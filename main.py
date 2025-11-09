@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 # This must be called before any os.getenv() calls
 load_dotenv()
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
-from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, get_mountain_time
+from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, Event, EventComment, get_mountain_time
 
 def calculate_price_reduction_fields(item: Item) -> dict:
     """Calculate price reduction fields for MarketItemResponse"""
@@ -1334,6 +1334,169 @@ class ImageUploadResponse(BaseModel):
 class ImageListResponse(BaseModel):
     images: List[dict]
     total: int
+
+# Event Models
+class EventCreate(BaseModel):
+    type: str = Field(
+        default="event", 
+        pattern="^(event|informational|advertisement|announcement|lost_found|request_help|offer_help|service_offer)$"
+    )
+    title: str = Field(..., min_length=1, max_length=150)
+    description: Optional[str] = Field(None)
+    category: Optional[str] = Field(None, max_length=50)
+    status: str = Field(default="upcoming", pattern="^(upcoming|ongoing|ended|cancelled)$")
+    is_public: bool = Field(default=True)
+    
+    # Location & Time
+    address: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=100)
+    zip: Optional[str] = Field(None, max_length=10)
+    location_type: Optional[str] = Field(None, pattern="^(indoor|outdoor|virtual)$", description="Location setting: indoor, outdoor, or virtual")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    timezone: Optional[str] = Field(None, max_length=50)
+    
+    # Pricing
+    price: Optional[float] = Field(None, ge=0, description="Price for paid events, entrance fees, or vendor booth costs")
+    is_free: bool = Field(default=True, description="Quick filter toggle for 'free events only'")
+    
+    # Filtering & Search
+    tags: Optional[List[str]] = Field(None, description="List of tags for filtering and search (e.g., ['kids', 'music', 'outdoor'])")
+    age_restriction: Optional[str] = Field(None, max_length=20, description="Age restriction (e.g., 'all', '18+', '21+')")
+    
+    # Organizer
+    organizer_name: Optional[str] = Field(None, max_length=150)
+    company: Optional[str] = Field(None, max_length=150)
+    contact_phone: Optional[str] = Field(None, max_length=20)
+    contact_email: Optional[str] = Field(None, max_length=150)
+    facebook_url: Optional[str] = Field(None, max_length=255)
+    instagram_url: Optional[str] = Field(None, max_length=255)
+    website: Optional[str] = Field(None, max_length=255)
+    
+    # Engagement
+    comments_enabled: bool = Field(default=True)
+    
+    # Media
+    gallery_urls: Optional[List[str]] = None
+    featured_image: Optional[str] = Field(None, max_length=500)
+
+class EventUpdate(BaseModel):
+    type: Optional[str] = Field(
+        None, 
+        pattern="^(event|informational|advertisement|announcement|lost_found|request_help|offer_help|service_offer)$"
+    )
+    title: Optional[str] = Field(None, min_length=1, max_length=150)
+    description: Optional[str] = None
+    category: Optional[str] = Field(None, max_length=50)
+    status: Optional[str] = Field(None, pattern="^(upcoming|ongoing|ended|cancelled)$")
+    is_public: Optional[bool] = None
+    
+    # Location & Time
+    address: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=100)
+    zip: Optional[str] = Field(None, max_length=10)
+    location_type: Optional[str] = Field(None, pattern="^(indoor|outdoor|virtual)$")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    timezone: Optional[str] = Field(None, max_length=50)
+    
+    # Pricing
+    price: Optional[float] = Field(None, ge=0)
+    is_free: Optional[bool] = None
+    
+    # Filtering & Search
+    tags: Optional[List[str]] = None
+    age_restriction: Optional[str] = Field(None, max_length=20)
+    
+    # Organizer
+    organizer_name: Optional[str] = Field(None, max_length=150)
+    company: Optional[str] = Field(None, max_length=150)
+    contact_phone: Optional[str] = Field(None, max_length=20)
+    contact_email: Optional[str] = Field(None, max_length=150)
+    facebook_url: Optional[str] = Field(None, max_length=255)
+    instagram_url: Optional[str] = Field(None, max_length=255)
+    website: Optional[str] = Field(None, max_length=255)
+    
+    # Engagement
+    comments_enabled: Optional[bool] = None
+    
+    # Media
+    gallery_urls: Optional[List[str]] = None
+    featured_image: Optional[str] = Field(None, max_length=500)
+
+class EventResponse(BaseModel):
+    id: str
+    type: str
+    title: str
+    description: Optional[str]
+    category: Optional[str]
+    status: str
+    is_public: bool
+    
+    # Location & Time
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+    location_type: Optional[str] = None  # indoor, outdoor, virtual
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    timezone: Optional[str] = None
+    
+    # Pricing
+    price: Optional[float] = None
+    is_free: bool = True
+    
+    # Filtering & Search
+    tags: Optional[List[str]] = None
+    age_restriction: Optional[str] = None
+    
+    # Organizer
+    organizer_id: str
+    organizer_username: str
+    organizer_name: Optional[str] = None
+    company: Optional[str] = None
+    organizer_profile_picture: Optional[str] = None
+    organizer_is_admin: bool = False
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
+    facebook_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    website: Optional[str] = None
+    
+    # Engagement
+    comments_enabled: bool
+    comment_count: int = 0
+    
+    # Media
+    gallery_urls: Optional[List[str]] = None
+    featured_image: Optional[str] = None
+    
+    # Metadata
+    created_at: datetime
+    last_updated: datetime
+
+class EventCommentCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+
+class EventCommentResponse(BaseModel):
+    id: str
+    event_id: str
+    user_id: str
+    username: str
+    user_profile_picture: Optional[str] = None
+    user_is_admin: bool = False
+    content: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
 # Visit Tracking Models
 class VisitedYardSaleResponse(BaseModel):
@@ -5518,6 +5681,437 @@ async def delete_notification(
     
     return {"message": "Notification deleted"}
 
+# Event Endpoints
+@app.post("/events", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
+async def create_event(
+    event: EventCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new event"""
+    # Create event
+    new_event = Event(
+        id=str(uuid.uuid4()),
+        type=event.type,
+        title=event.title,
+        description=event.description,
+        category=event.category,
+        status=event.status,
+        is_public=event.is_public,
+        address=event.address,
+        city=event.city,
+        state=event.state,
+        zip=event.zip,
+        location_type=event.location_type,
+        start_date=event.start_date,
+        end_date=event.end_date,
+        start_time=event.start_time,
+        end_time=event.end_time,
+        timezone=event.timezone,
+        price=event.price,
+        is_free=event.is_free,
+        tags=event.tags if event.tags else None,
+        age_restriction=event.age_restriction,
+        organizer_id=current_user.id,
+        organizer_name=event.organizer_name or current_user.full_name,
+        company=event.company,
+        contact_phone=event.contact_phone,
+        contact_email=event.contact_email,
+        facebook_url=event.facebook_url,
+        instagram_url=event.instagram_url,
+        website=event.website,
+        comments_enabled=event.comments_enabled,
+        gallery_urls=event.gallery_urls if event.gallery_urls else None,
+        featured_image=event.featured_image,
+        created_at=get_mountain_time(),
+        last_updated=get_mountain_time()
+    )
+    
+    db.add(new_event)
+    db.commit()
+    db.refresh(new_event)
+    
+    # Get organizer info
+    organizer = get_user_by_id_helper(db, new_event.organizer_id)
+    
+    # Get comment count
+    comment_count = db.query(EventComment).filter(EventComment.event_id == new_event.id).count()
+    
+    return EventResponse(
+        id=new_event.id,
+        type=new_event.type,
+        title=new_event.title,
+        description=new_event.description,
+        category=new_event.category,
+        status=new_event.status,
+        is_public=new_event.is_public,
+        address=new_event.address,
+        city=new_event.city,
+        state=new_event.state,
+        zip=new_event.zip,
+        location_type=new_event.location_type,
+        start_date=new_event.start_date,
+        end_date=new_event.end_date,
+        start_time=new_event.start_time,
+        end_time=new_event.end_time,
+        timezone=new_event.timezone,
+        price=float(new_event.price) if new_event.price else None,
+        is_free=new_event.is_free,
+        tags=new_event.tags if new_event.tags else None,
+        age_restriction=new_event.age_restriction,
+        organizer_id=new_event.organizer_id,
+        organizer_username=organizer.username,
+        organizer_name=new_event.organizer_name,
+        company=new_event.company,
+        organizer_profile_picture=organizer.profile_picture,
+        organizer_is_admin=(organizer.permissions == "admin"),
+        contact_phone=new_event.contact_phone,
+        contact_email=new_event.contact_email,
+        facebook_url=new_event.facebook_url,
+        instagram_url=getattr(new_event, 'instagram_url', None),
+        website=new_event.website,
+        comments_enabled=new_event.comments_enabled,
+        comment_count=comment_count,
+        gallery_urls=new_event.gallery_urls if new_event.gallery_urls else None,
+        featured_image=new_event.featured_image,
+        created_at=new_event.created_at,
+        last_updated=new_event.last_updated
+    )
+
+@app.get("/events", response_model=List[EventResponse])
+async def get_events(
+    skip: int = 0,
+    limit: int = 100,
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    location_type: Optional[str] = None,
+    is_free: Optional[bool] = None,
+    category: Optional[str] = None,
+    tags: Optional[str] = None,  # Comma-separated tags
+    age_restriction: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all events with optional filtering"""
+    query = db.query(Event).filter(Event.is_public == True)
+    
+    # Apply filters
+    if type:
+        query = query.filter(Event.type == type)
+    if status:
+        query = query.filter(Event.status == status)
+    if city:
+        query = query.filter(Event.city.ilike(f"%{city}%"))
+    if state:
+        query = query.filter(Event.state.ilike(f"%{state}%"))
+    if location_type:
+        query = query.filter(Event.location_type == location_type)
+    if is_free is not None:
+        query = query.filter(Event.is_free == is_free)
+    if category:
+        query = query.filter(Event.category == category)
+    if age_restriction:
+        query = query.filter(Event.age_restriction == age_restriction)
+    if tags:
+        # Filter by tags (JSON contains)
+        tag_list = [tag.strip() for tag in tags.split(",")]
+        from sqlalchemy import func
+        for tag in tag_list:
+            query = query.filter(func.json_contains(Event.tags, f'"{tag}"'))
+    
+    events = query.order_by(Event.created_at.desc()).offset(skip).limit(limit).all()
+    
+    result = []
+    for event in events:
+        organizer = get_user_by_id_helper(db, event.organizer_id)
+        comment_count = db.query(EventComment).filter(EventComment.event_id == event.id).count()
+        
+        result.append(EventResponse(
+            id=event.id,
+            type=event.type,
+            title=event.title,
+            description=event.description,
+            category=event.category,
+            status=event.status,
+            is_public=event.is_public,
+            address=event.address,
+            city=event.city,
+            state=event.state,
+            zip=event.zip,
+            location_type=event.location_type,
+            start_date=event.start_date,
+            end_date=event.end_date,
+            start_time=event.start_time,
+            end_time=event.end_time,
+            timezone=event.timezone,
+            price=float(event.price) if event.price else None,
+            is_free=event.is_free,
+            tags=event.tags if event.tags else None,
+            age_restriction=event.age_restriction,
+            organizer_id=event.organizer_id,
+            organizer_username=organizer.username,
+            organizer_name=event.organizer_name,
+            company=event.company,
+            organizer_profile_picture=organizer.profile_picture,
+            organizer_is_admin=(organizer.permissions == "admin"),
+            contact_phone=event.contact_phone,
+            contact_email=event.contact_email,
+            facebook_url=event.facebook_url,
+            instagram_url=getattr(event, 'instagram_url', None),
+            website=event.website,
+            comments_enabled=event.comments_enabled,
+            comment_count=comment_count,
+            gallery_urls=event.gallery_urls if event.gallery_urls else None,
+            featured_image=event.featured_image,
+            created_at=event.created_at,
+            last_updated=event.last_updated
+        ))
+    
+    return result
+
+@app.get("/events/{event_id}", response_model=EventResponse)
+async def get_event(event_id: str, db: Session = Depends(get_db)):
+    """Get a specific event by ID"""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    organizer = get_user_by_id_helper(db, event.organizer_id)
+    comment_count = db.query(EventComment).filter(EventComment.event_id == event.id).count()
+    
+    return EventResponse(
+        id=event.id,
+        type=event.type,
+        title=event.title,
+        description=event.description,
+        category=event.category,
+        status=event.status,
+        is_public=event.is_public,
+        address=event.address,
+        city=event.city,
+        state=event.state,
+        zip=event.zip,
+        location_type=event.location_type,
+        start_date=event.start_date,
+        end_date=event.end_date,
+        start_time=event.start_time,
+        end_time=event.end_time,
+        timezone=event.timezone,
+        price=float(event.price) if event.price else None,
+        is_free=event.is_free,
+        tags=event.tags if event.tags else None,
+        age_restriction=event.age_restriction,
+        organizer_id=event.organizer_id,
+        organizer_username=organizer.username,
+        organizer_name=event.organizer_name,
+        company=event.company,
+        organizer_profile_picture=organizer.profile_picture,
+        organizer_is_admin=(organizer.permissions == "admin"),
+        contact_phone=event.contact_phone,
+        contact_email=event.contact_email,
+        facebook_url=event.facebook_url,
+        instagram_url=getattr(event, 'instagram_url', None),
+        website=event.website,
+        comments_enabled=event.comments_enabled,
+        comment_count=comment_count,
+        gallery_urls=event.gallery_urls if event.gallery_urls else None,
+        featured_image=event.featured_image,
+        created_at=event.created_at,
+        last_updated=event.last_updated
+    )
+
+@app.put("/events/{event_id}", response_model=EventResponse)
+async def update_event(
+    event_id: str,
+    event_update: EventUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Update an event (organizer only, or admin can edit any event)"""
+    # Allow admins to edit any event, otherwise only organizer can edit
+    if current_user.permissions == "admin":
+        event = db.query(Event).filter(Event.id == event_id).first()
+    else:
+        event = db.query(Event).filter(
+            Event.id == event_id,
+            Event.organizer_id == current_user.id
+        ).first()
+    
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Event with id {event_id} not found"
+        )
+    
+    # Update only provided fields
+    update_data = event_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "tags" and value is not None:
+            setattr(event, field, value)
+        elif field == "gallery_urls" and value is not None:
+            setattr(event, field, value)
+        else:
+            setattr(event, field, value)
+    
+    event.last_updated = get_mountain_time()
+    db.commit()
+    db.refresh(event)
+    
+    # Get organizer info
+    organizer = get_user_by_id_helper(db, event.organizer_id)
+    comment_count = db.query(EventComment).filter(EventComment.event_id == event.id).count()
+    
+    return EventResponse(
+        id=event.id,
+        type=event.type,
+        title=event.title,
+        description=event.description,
+        category=event.category,
+        status=event.status,
+        is_public=event.is_public,
+        address=event.address,
+        city=event.city,
+        state=event.state,
+        zip=event.zip,
+        location_type=event.location_type,
+        start_date=event.start_date,
+        end_date=event.end_date,
+        start_time=event.start_time,
+        end_time=event.end_time,
+        timezone=event.timezone,
+        price=float(event.price) if event.price else None,
+        is_free=event.is_free,
+        tags=event.tags if event.tags else None,
+        age_restriction=event.age_restriction,
+        organizer_id=event.organizer_id,
+        organizer_username=organizer.username,
+        organizer_name=event.organizer_name,
+        company=event.company,
+        organizer_profile_picture=organizer.profile_picture,
+        organizer_is_admin=(organizer.permissions == "admin"),
+        contact_phone=event.contact_phone,
+        contact_email=event.contact_email,
+        facebook_url=event.facebook_url,
+        instagram_url=getattr(event, 'instagram_url', None),
+        website=event.website,
+        comments_enabled=event.comments_enabled,
+        comment_count=comment_count,
+        gallery_urls=event.gallery_urls if event.gallery_urls else None,
+        featured_image=event.featured_image,
+        created_at=event.created_at,
+        last_updated=event.last_updated
+    )
+
+@app.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_event(
+    event_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete an event (organizer only, or admin can delete any event)"""
+    # Allow admins to delete any event, otherwise only organizer can delete
+    if current_user.permissions == "admin":
+        event = db.query(Event).filter(Event.id == event_id).first()
+    else:
+        event = db.query(Event).filter(
+            Event.id == event_id,
+            Event.organizer_id == current_user.id
+        ).first()
+    
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Event with id {event_id} not found"
+        )
+    
+    # Delete related comments first (cascade should handle this, but being explicit)
+    db.query(EventComment).filter(EventComment.event_id == event_id).delete()
+    
+    # Delete the event
+    db.delete(event)
+    db.commit()
+    
+    return None
+
+# Event Comment Endpoints
+@app.post("/events/{event_id}/comments", response_model=EventCommentResponse, status_code=status.HTTP_201_CREATED)
+async def create_event_comment(
+    event_id: str,
+    comment: EventCommentCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Create a comment on an event"""
+    # Check if event exists
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Check if comments are enabled
+    if not event.comments_enabled:
+        raise HTTPException(status_code=400, detail="Comments are disabled for this event")
+    
+    # Create comment
+    new_comment = EventComment(
+        id=str(uuid.uuid4()),
+        event_id=event_id,
+        user_id=current_user.id,
+        content=comment.content,
+        created_at=get_mountain_time(),
+        updated_at=None
+    )
+    
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+    
+    return EventCommentResponse(
+        id=new_comment.id,
+        event_id=new_comment.event_id,
+        user_id=new_comment.user_id,
+        username=current_user.username,
+        user_profile_picture=current_user.profile_picture,
+        user_is_admin=(current_user.permissions == "admin"),
+        content=new_comment.content,
+        created_at=new_comment.created_at,
+        updated_at=new_comment.updated_at
+    )
+
+@app.get("/events/{event_id}/comments", response_model=List[EventCommentResponse])
+async def get_event_comments(
+    event_id: str,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get all comments for an event"""
+    # Check if event exists
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    comments = db.query(EventComment).filter(
+        EventComment.event_id == event_id
+    ).order_by(EventComment.created_at.asc()).offset(skip).limit(limit).all()
+    
+    result = []
+    for comment in comments:
+        user = get_user_by_id_helper(db, comment.user_id)
+        result.append(EventCommentResponse(
+            id=comment.id,
+            event_id=comment.event_id,
+            user_id=comment.user_id,
+            username=user.username,
+            user_profile_picture=user.profile_picture,
+            user_is_admin=(user.permissions == "admin"),
+            content=comment.content,
+            created_at=comment.created_at,
+            updated_at=comment.updated_at
+        ))
+    
+    return result
+
 # Admin-only endpoints
 @app.get("/admin/users", response_model=dict)
 async def get_all_users(
@@ -5773,9 +6367,10 @@ async def delete_user_admin(
         db.query(MarketItemConversation).filter(MarketItemConversation.participant1_id == user.id).delete()
         db.query(MarketItemConversation).filter(MarketItemConversation.participant2_id == user.id).delete()
         
-        # Step 8: Delete comments made by user (not on user's yard sales/items - those are already deleted)
+        # Step 8: Delete comments made by user (not on user's yard sales/items/events - those are already deleted)
         db.query(Comment).filter(Comment.user_id == user.id).delete()
         db.query(MarketItemComment).filter(MarketItemComment.user_id == user.id).delete()
+        db.query(EventComment).filter(EventComment.user_id == user.id).delete()
         
         # Step 9: Delete messages sent/received by user (standalone messages)
         db.query(Message).filter(Message.sender_id == user.id).delete()
@@ -5799,6 +6394,14 @@ async def delete_user_admin(
             # Delete notifications for user's yard sales
             db.query(Notification).filter(Notification.related_yard_sale_id.in_(yard_sale_ids)).delete()
         db.query(YardSale).filter(YardSale.owner_id == user.id).delete()
+        
+        # Step 12: Delete user's events - comments will cascade
+        user_events = db.query(Event).filter(Event.organizer_id == user.id).all()
+        event_ids = [event.id for event in user_events] if user_events else []
+        if event_ids:
+            # Delete comments on user's events (cascade should handle this, but being explicit)
+            db.query(EventComment).filter(EventComment.event_id.in_(event_ids)).delete()
+        db.query(Event).filter(Event.organizer_id == user.id).delete()
         
         # Delete user's ratings (both given and received)
         db.query(UserRating).filter(UserRating.reviewer_id == user.id).delete()
@@ -5983,6 +6586,67 @@ async def get_all_yard_sales_admin(
     except Exception as e:
         import traceback
         print(f"Error getting admin yard sales: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/admin/events", response_model=dict)
+async def get_all_events_admin(
+    skip: int = 0,
+    limit: int = 100,
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get all events (admin only) - includes private events"""
+    try:
+        query = db.query(Event)
+        
+        if type:
+            query = query.filter(Event.type == type)
+        if status:
+            query = query.filter(Event.status == status)
+        
+        total_count = query.count()
+        events = query.order_by(Event.created_at.desc()).offset(skip).limit(limit).all()
+        
+        result = []
+        for event in events:
+            organizer = get_user_by_id_helper(db, event.organizer_id)
+            comment_count = db.query(EventComment).filter(EventComment.event_id == event.id).count()
+            
+            result.append({
+                "id": str(event.id),
+                "type": event.type,
+                "title": event.title,
+                "description": event.description,
+                "category": event.category,
+                "status": event.status,
+                "is_public": event.is_public,
+                "city": event.city,
+                "state": event.state,
+                "location_type": event.location_type,
+                "is_free": event.is_free,
+                "price": float(event.price) if event.price else None,
+                "organizer_id": str(event.organizer_id),
+                "organizer_username": organizer.username if organizer else "unknown",
+                "organizer_is_admin": organizer.permissions == "admin" if organizer else False,
+                "organizer_profile_picture": organizer.profile_picture if organizer else None,
+                "comment_count": comment_count,
+                "created_at": event.created_at.isoformat() if event.created_at else None,
+                "last_updated": event.last_updated.isoformat() if event.last_updated else None
+            })
+        
+        return {
+            "events": result,
+            "total": total_count,
+            "limit": limit,
+            "offset": skip,
+            "has_more": (skip + len(result)) < total_count
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error getting admin events: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
