@@ -5952,66 +5952,74 @@ async def get_event_conversations(
     db: Session = Depends(get_db)
 ):
     """Get all event conversations for the current authenticated user"""
-    # Get all conversations where user is a participant
-    conversations = db.query(EventConversation).filter(
-        (EventConversation.participant1_id == current_user.id) | 
-        (EventConversation.participant2_id == current_user.id)
-    ).order_by(EventConversation.updated_at.desc()).all()
-    
-    result: List[EventConversationResponse] = []
-    for conv in conversations:
-        # Get event info
-        event = db.query(Event).filter(Event.id == conv.event_id).first()
+    try:
+        # Get all conversations where user is a participant
+        conversations = db.query(EventConversation).filter(
+            (EventConversation.participant1_id == current_user.id) | 
+            (EventConversation.participant2_id == current_user.id)
+        ).order_by(EventConversation.updated_at.desc()).all()
         
-        # Get participant usernames
-        p1 = get_user_by_id_helper(db, conv.participant1_id)
-        p2 = get_user_by_id_helper(db, conv.participant2_id)
-        
-        # Get last message
-        last_msg = db.query(EventMessage).filter(
-            EventMessage.conversation_id == conv.id
-        ).order_by(EventMessage.created_at.desc()).first()
-        
-        last_message_response = None
-        if last_msg:
-            sender = get_user_by_id_helper(db, last_msg.sender_id)
-            recipient = get_user_by_id_helper(db, last_msg.recipient_id)
-            last_message_response = EventMessageResponse(
-                id=last_msg.id,
-                content=last_msg.content,
-                is_read=last_msg.is_read,
-                created_at=last_msg.created_at if last_msg.created_at else get_mountain_time(),
-                conversation_id=last_msg.conversation_id,
-                sender_id=last_msg.sender_id,
-                sender_username=sender.username if sender else "unknown",
-                sender_is_admin=(sender.permissions == "admin") if sender else False,
-                sender_profile_picture=sender.profile_picture if sender else None,
-                recipient_id=last_msg.recipient_id,
-                recipient_username=recipient.username if recipient else "unknown",
-                event_id=conv.event_id
-            )
-        
-        # Count unread messages
-        unread_count = db.query(EventMessage).filter(
-            EventMessage.conversation_id == conv.id,
-            EventMessage.recipient_id == current_user.id,
-            EventMessage.is_read == False
-        ).count()
-        
-        result.append(EventConversationResponse(
-            id=conv.id,
-            event_id=conv.event_id,
-            event_title=event.title if event else None,
-            participant1_id=conv.participant1_id,
-            participant1_username=p1.username if p1 else None,
-            participant2_id=conv.participant2_id,
-            participant2_username=p2.username if p2 else None,
-            created_at=conv.created_at,
-            updated_at=conv.updated_at,
-            last_message=last_message_response,
-            unread_count=unread_count
-        ))
-    return result
+        result: List[EventConversationResponse] = []
+        for conv in conversations:
+            # Get event info
+            event = db.query(Event).filter(Event.id == conv.event_id).first()
+            
+            # Get participant usernames
+            p1 = get_user_by_id_helper(db, conv.participant1_id)
+            p2 = get_user_by_id_helper(db, conv.participant2_id)
+            
+            # Get last message
+            last_msg = db.query(EventMessage).filter(
+                EventMessage.conversation_id == conv.id
+            ).order_by(EventMessage.created_at.desc()).first()
+            
+            last_message_response = None
+            if last_msg:
+                sender = get_user_by_id_helper(db, last_msg.sender_id)
+                recipient = get_user_by_id_helper(db, last_msg.recipient_id)
+                last_message_response = EventMessageResponse(
+                    id=last_msg.id,
+                    content=last_msg.content,
+                    is_read=last_msg.is_read,
+                    created_at=last_msg.created_at if last_msg.created_at else get_mountain_time(),
+                    conversation_id=last_msg.conversation_id,
+                    sender_id=last_msg.sender_id,
+                    sender_username=sender.username if sender else "unknown",
+                    sender_is_admin=(sender.permissions == "admin") if sender else False,
+                    sender_profile_picture=sender.profile_picture if sender else None,
+                    recipient_id=last_msg.recipient_id,
+                    recipient_username=recipient.username if recipient else "unknown",
+                    event_id=conv.event_id
+                )
+            
+            # Count unread messages
+            unread_count = db.query(EventMessage).filter(
+                EventMessage.conversation_id == conv.id,
+                EventMessage.recipient_id == current_user.id,
+                EventMessage.is_read == False
+            ).count()
+            
+            result.append(EventConversationResponse(
+                id=conv.id,
+                event_id=conv.event_id,
+                event_title=event.title if event else None,
+                participant1_id=conv.participant1_id,
+                participant1_username=p1.username if p1 else None,
+                participant2_id=conv.participant2_id,
+                participant2_username=p2.username if p2 else None,
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+                last_message=last_message_response,
+                unread_count=unread_count
+            ))
+        return result
+    except Exception as e:
+        import traceback
+        error_detail = f"Error getting event conversations: {str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_detail
+        )
 
 @app.get("/events/conversations/{conversation_id}/messages", response_model=List[EventMessageResponse])
 async def get_event_conversation_messages(
@@ -6133,22 +6141,30 @@ async def get_event_unread_count(
     db: Session = Depends(get_db)
 ):
     """Get total count of unread event messages for current user"""
-    # Get conversations where user is a participant
-    conversations = db.query(EventConversation).filter(
-        (EventConversation.participant1_id == current_user.id) | 
-        (EventConversation.participant2_id == current_user.id)
-    ).all()
-    
-    conversation_ids = [conv.id for conv in conversations]
-    
-    # Count unread messages in these conversations
-    unread_count = db.query(EventMessage).filter(
-        EventMessage.conversation_id.in_(conversation_ids),
-        EventMessage.recipient_id == current_user.id,
-        EventMessage.is_read == False
-    ).count() if conversation_ids else 0
-    
-    return {"unread_count": unread_count}
+    try:
+        # Get conversations where user is a participant
+        conversations = db.query(EventConversation).filter(
+            (EventConversation.participant1_id == current_user.id) | 
+            (EventConversation.participant2_id == current_user.id)
+        ).all()
+        
+        conversation_ids = [conv.id for conv in conversations]
+        
+        # Count unread messages in these conversations
+        unread_count = db.query(EventMessage).filter(
+            EventMessage.conversation_id.in_(conversation_ids),
+            EventMessage.recipient_id == current_user.id,
+            EventMessage.is_read == False
+        ).count() if conversation_ids else 0
+        
+        return {"unread_count": unread_count}
+    except Exception as e:
+        import traceback
+        error_detail = f"Error getting event unread count: {str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_detail
+        )
 
 @app.get("/events/{event_id}", response_model=EventResponse)
 async def get_event(event_id: str, db: Session = Depends(get_db)):
