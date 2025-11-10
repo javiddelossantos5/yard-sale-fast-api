@@ -28,10 +28,12 @@ else
 fi
 
 # Create events table (without foreign key first)
+# Note: organizer_id uses utf8mb4_0900_ai_ci to match users.id collation
+#       events.id uses utf8mb4_unicode_ci (as detected earlier)
 echo "📋 Creating 'events' table..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF 2>/dev/null
 CREATE TABLE IF NOT EXISTS events (
-    id CHAR(36) PRIMARY KEY,
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci PRIMARY KEY,
     type VARCHAR(20) NOT NULL DEFAULT 'event',
     title VARCHAR(150) NOT NULL,
     description TEXT,
@@ -53,14 +55,21 @@ CREATE TABLE IF NOT EXISTS events (
     
     -- Pricing
     price DECIMAL(10, 2),
-    is_free BOOLEAN NOT NULL DEFAULT TRUE,
+    is_free BOOLEAN NOT NULL DEFAULT FALSE,
     
     -- Filtering & Search
     tags JSON,
     age_restriction VARCHAR(20),
     
-    -- Organizer
-    organizer_id $USER_ID_TYPE NOT NULL,
+    -- Job Posting Fields
+    job_title VARCHAR(150) NULL COMMENT 'Job title for job_posting type events',
+    employment_type VARCHAR(20) NULL COMMENT 'Employment type: full_time, part_time, contract, temporary, seasonal, internship',
+    
+    -- Weather Fields
+    weather_conditions VARCHAR(255) NULL COMMENT 'Weather conditions for weather type events',
+    
+    -- Organizer (using utf8mb4_0900_ai_ci to match users.id collation)
+    organizer_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
     organizer_name VARCHAR(150),
     company VARCHAR(150),
     contact_phone VARCHAR(20),
@@ -114,12 +123,14 @@ else
 fi
 
 # Create event_comments table (without foreign keys first)
+# Note: user_id uses utf8mb4_0900_ai_ci to match users.id collation
+#       event_id uses utf8mb4_unicode_ci to match events.id collation
 echo "📋 Creating 'event_comments' table..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF 2>/dev/null
 CREATE TABLE IF NOT EXISTS event_comments (
-    id CHAR(36) PRIMARY KEY,
-    event_id CHAR(36) NOT NULL,
-    user_id $USER_ID_TYPE NOT NULL,
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci PRIMARY KEY,
+    event_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    user_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
     content TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME,

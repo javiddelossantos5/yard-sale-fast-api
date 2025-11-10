@@ -46,13 +46,14 @@ DROP TABLE IF EXISTS event_conversations;
 DROPEOF
 
 # Create event_conversations table (without foreign keys first)
+# Note: participant columns use utf8mb4_0900_ai_ci to match users.id collation
 echo "📋 Creating event_conversations table..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF
 CREATE TABLE event_conversations (
-    id CHAR(36) PRIMARY KEY,
-    event_id CHAR(36) NOT NULL,
-    participant1_id CHAR(36) NOT NULL COMMENT 'Inquirer',
-    participant2_id CHAR(36) NOT NULL COMMENT 'Event organizer',
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci PRIMARY KEY,
+    event_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    participant1_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'Inquirer',
+    participant2_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'Event organizer',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     INDEX idx_event_id (event_id),
@@ -90,17 +91,18 @@ else
 fi
 
 # Create event_messages table (without foreign keys first)
+# Note: sender_id and recipient_id use utf8mb4_0900_ai_ci to match users.id collation
 echo ""
 echo "📋 Creating event_messages table..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF
 CREATE TABLE event_messages (
-    id CHAR(36) PRIMARY KEY,
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci PRIMARY KEY,
     content TEXT NOT NULL,
     is_read BOOLEAN DEFAULT FALSE,
     created_at DATETIME NOT NULL,
-    conversation_id CHAR(36) NOT NULL,
-    sender_id CHAR(36) NOT NULL,
-    recipient_id CHAR(36) NOT NULL,
+    conversation_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    sender_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+    recipient_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
     INDEX idx_conversation_id (conversation_id),
     INDEX idx_sender_id (sender_id),
     INDEX idx_recipient_id (recipient_id),
