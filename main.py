@@ -7033,9 +7033,14 @@ async def get_admin_dashboard_stats(
         total_users = db.query(User).count()
         total_items = db.query(Item).count()
         total_yard_sales = db.query(YardSale).count()
+        total_events = db.query(Event).count()
         active_items = db.query(Item).filter(Item.status == "active", Item.is_public == True).count()
         active_yard_sales = db.query(YardSale).filter(YardSale.is_active == True).count()
         from sqlalchemy import or_
+        active_events = db.query(Event).filter(
+            Event.is_public == True,
+            or_(Event.status == "upcoming", Event.status == "ongoing")
+        ).count()
         free_items = db.query(Item).filter(
             or_(Item.is_free == True, Item.price == 0.0)
         ).count()
@@ -7046,19 +7051,23 @@ async def get_admin_dashboard_stats(
         seven_days_ago = get_mountain_time() - timedelta(days=7)
         recent_items = db.query(Item).filter(Item.created_at >= seven_days_ago).count()
         recent_yard_sales = db.query(YardSale).filter(YardSale.created_at >= seven_days_ago).count()
+        recent_events = db.query(Event).filter(Event.created_at >= seven_days_ago).count()
         recent_users = db.query(User).filter(User.created_at >= seven_days_ago).count()
         
         return {
             "total_users": total_users,
             "total_items": total_items,
             "total_yard_sales": total_yard_sales,
+            "total_events": total_events,
             "active_items": active_items,
             "active_yard_sales": active_yard_sales,
+            "active_events": active_events,
             "free_items": free_items,
             "admin_users": admin_users,
             "recent_activity": {
                 "items_last_7_days": recent_items,
                 "yard_sales_last_7_days": recent_yard_sales,
+                "events_last_7_days": recent_events,
                 "users_last_7_days": recent_users
             }
         }
