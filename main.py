@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 # This must be called before any os.getenv() calls
 load_dotenv()
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
-from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, Event, EventComment, get_mountain_time
+from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, Event, EventComment, EventConversation, EventMessage, get_mountain_time
 
 def calculate_price_reduction_fields(item: Item) -> dict:
     """Calculate price reduction fields for MarketItemResponse"""
@@ -1522,6 +1522,37 @@ class EventCommentResponse(BaseModel):
     content: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+# Event Messaging Models
+class EventMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000, description="Message content")
+
+class EventMessageResponse(BaseModel):
+    id: str
+    content: str
+    is_read: bool
+    created_at: datetime
+    conversation_id: str
+    sender_id: str
+    sender_username: str
+    sender_is_admin: bool = False
+    sender_profile_picture: Optional[str] = None
+    recipient_id: str
+    recipient_username: str
+    event_id: str
+
+class EventConversationResponse(BaseModel):
+    id: str
+    event_id: str
+    event_title: Optional[str] = None
+    participant1_id: str
+    participant1_username: Optional[str] = None
+    participant2_id: str
+    participant2_username: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_message: Optional[EventMessageResponse] = None
+    unread_count: int = 0
 
 # Visit Tracking Models
 class VisitedYardSaleResponse(BaseModel):
@@ -5914,6 +5945,211 @@ async def get_events(
     
     return result
 
+# Event Conversation and Message Endpoints (must come before /events/{event_id} to avoid route conflicts)
+@app.get("/events/conversations", response_model=List[EventConversationResponse])
+async def get_event_conversations(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all event conversations for the current authenticated user"""
+    # Get all conversations where user is a participant
+    conversations = db.query(EventConversation).filter(
+        (EventConversation.participant1_id == current_user.id) | 
+        (EventConversation.participant2_id == current_user.id)
+    ).order_by(EventConversation.updated_at.desc()).all()
+    
+    result: List[EventConversationResponse] = []
+    for conv in conversations:
+        # Get event info
+        event = db.query(Event).filter(Event.id == conv.event_id).first()
+        
+        # Get participant usernames
+        p1 = get_user_by_id_helper(db, conv.participant1_id)
+        p2 = get_user_by_id_helper(db, conv.participant2_id)
+        
+        # Get last message
+        last_msg = db.query(EventMessage).filter(
+            EventMessage.conversation_id == conv.id
+        ).order_by(EventMessage.created_at.desc()).first()
+        
+        last_message_response = None
+        if last_msg:
+            sender = get_user_by_id_helper(db, last_msg.sender_id)
+            recipient = get_user_by_id_helper(db, last_msg.recipient_id)
+            last_message_response = EventMessageResponse(
+                id=last_msg.id,
+                content=last_msg.content,
+                is_read=last_msg.is_read,
+                created_at=last_msg.created_at if last_msg.created_at else get_mountain_time(),
+                conversation_id=last_msg.conversation_id,
+                sender_id=last_msg.sender_id,
+                sender_username=sender.username if sender else "unknown",
+                sender_is_admin=(sender.permissions == "admin") if sender else False,
+                sender_profile_picture=sender.profile_picture if sender else None,
+                recipient_id=last_msg.recipient_id,
+                recipient_username=recipient.username if recipient else "unknown",
+                event_id=conv.event_id
+            )
+        
+        # Count unread messages
+        unread_count = db.query(EventMessage).filter(
+            EventMessage.conversation_id == conv.id,
+            EventMessage.recipient_id == current_user.id,
+            EventMessage.is_read == False
+        ).count()
+        
+        result.append(EventConversationResponse(
+            id=conv.id,
+            event_id=conv.event_id,
+            event_title=event.title if event else None,
+            participant1_id=conv.participant1_id,
+            participant1_username=p1.username if p1 else None,
+            participant2_id=conv.participant2_id,
+            participant2_username=p2.username if p2 else None,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+            last_message=last_message_response,
+            unread_count=unread_count
+        ))
+    return result
+
+@app.get("/events/conversations/{conversation_id}/messages", response_model=List[EventMessageResponse])
+async def get_event_conversation_messages(
+    conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a specific event conversation"""
+    # Get conversation
+    conversation = db.query(EventConversation).filter(EventConversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify user is a participant
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this conversation")
+    
+    # Get all messages
+    messages = db.query(EventMessage).filter(
+        EventMessage.conversation_id == conversation_id
+    ).order_by(EventMessage.created_at.asc()).all()
+    
+    result: List[EventMessageResponse] = []
+    for msg in messages:
+        sender = get_user_by_id_helper(db, msg.sender_id)
+        recipient = get_user_by_id_helper(db, msg.recipient_id)
+        result.append(EventMessageResponse(
+            id=msg.id,
+            content=msg.content,
+            is_read=msg.is_read,
+            created_at=msg.created_at if msg.created_at else get_mountain_time(),
+            conversation_id=msg.conversation_id,
+            sender_id=msg.sender_id,
+            sender_username=sender.username if sender else "unknown",
+            sender_is_admin=(sender.permissions == "admin") if sender else False,
+            sender_profile_picture=sender.profile_picture if sender else None,
+            recipient_id=msg.recipient_id,
+            recipient_username=recipient.username if recipient else "unknown",
+            event_id=conversation.event_id
+        ))
+    return result
+
+@app.post("/events/conversations/{conversation_id}/messages", response_model=EventMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_event_conversation_message(
+    conversation_id: str,
+    message: EventMessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message in an existing event conversation"""
+    # Get conversation
+    conversation = db.query(EventConversation).filter(EventConversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify user is a participant
+    if current_user.id not in [conversation.participant1_id, conversation.participant2_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to send messages in this conversation")
+    
+    # Determine recipient (the other participant)
+    recipient_id = conversation.participant2_id if current_user.id == conversation.participant1_id else conversation.participant1_id
+    
+    # Create message
+    db_message = EventMessage(
+        content=message.content,
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        recipient_id=recipient_id
+    )
+    db.add(db_message)
+    
+    # Update conversation updated_at
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(db_message)
+    
+    # Get recipient username
+    recipient = get_user_by_id_helper(db, recipient_id)
+    
+    return EventMessageResponse(
+        id=db_message.id,
+        content=db_message.content,
+        is_read=db_message.is_read,
+        created_at=db_message.created_at,
+        conversation_id=db_message.conversation_id,
+        sender_id=current_user.id,
+        sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
+        sender_profile_picture=current_user.profile_picture,
+        recipient_id=recipient_id,
+        recipient_username=recipient.username if recipient else "unknown",
+        event_id=conversation.event_id
+    )
+
+@app.put("/events/messages/{message_id}/read", status_code=status.HTTP_200_OK)
+async def mark_event_message_read(
+    message_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Mark an event message as read"""
+    message = db.query(EventMessage).filter(
+        EventMessage.id == message_id,
+        EventMessage.recipient_id == current_user.id
+    ).first()
+    
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    
+    message.is_read = True
+    db.commit()
+    
+    return {"message": "Message marked as read"}
+
+@app.get("/events/messages/unread-count", response_model=dict)
+async def get_event_unread_count(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get total count of unread event messages for current user"""
+    # Get conversations where user is a participant
+    conversations = db.query(EventConversation).filter(
+        (EventConversation.participant1_id == current_user.id) | 
+        (EventConversation.participant2_id == current_user.id)
+    ).all()
+    
+    conversation_ids = [conv.id for conv in conversations]
+    
+    # Count unread messages in these conversations
+    unread_count = db.query(EventMessage).filter(
+        EventMessage.conversation_id.in_(conversation_ids),
+        EventMessage.recipient_id == current_user.id,
+        EventMessage.is_read == False
+    ).count() if conversation_ids else 0
+    
+    return {"unread_count": unread_count}
+
 @app.get("/events/{event_id}", response_model=EventResponse)
 async def get_event(event_id: str, db: Session = Depends(get_db)):
     """Get a specific event by ID"""
@@ -6075,7 +6311,14 @@ async def delete_event(
             detail=f"Event with id {event_id} not found"
         )
     
-    # Delete related comments first (cascade should handle this, but being explicit)
+    # Delete related records first (cascade should handle this, but being explicit)
+    # Delete event messages
+    conversations = db.query(EventConversation).filter(EventConversation.event_id == event_id).all()
+    for conv in conversations:
+        db.query(EventMessage).filter(EventMessage.conversation_id == conv.id).delete()
+    # Delete event conversations
+    db.query(EventConversation).filter(EventConversation.event_id == event_id).delete()
+    # Delete event comments
     db.query(EventComment).filter(EventComment.event_id == event_id).delete()
     
     # Delete the event
@@ -6331,6 +6574,87 @@ async def get_event_images(
             detail=f"Failed to load images: {str(e)}"
         )
 
+@app.post("/events/{event_id}/messages", response_model=EventMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_event_message(
+    event_id: str,
+    message: EventMessageCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Send initial message to an event organizer (creates a conversation)"""
+    # Get the event
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    
+    # Determine recipient (organizer is the event organizer)
+    organizer_id = event.organizer_id
+    recipient_id = organizer_id
+    
+    # Can't message yourself
+    if current_user.id == recipient_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send message to yourself")
+    
+    # Find or create conversation
+    conversation = db.query(EventConversation).filter(
+        EventConversation.event_id == event_id,
+        ((EventConversation.participant1_id == current_user.id) & (EventConversation.participant2_id == recipient_id)) |
+        ((EventConversation.participant1_id == recipient_id) & (EventConversation.participant2_id == current_user.id))
+    ).first()
+    
+    if not conversation:
+        # Create new conversation (participant1 is the inquirer, participant2 is the organizer)
+        if current_user.id == organizer_id:
+            # Organizer messaging someone (shouldn't happen normally, but handle it)
+            conversation = EventConversation(
+                event_id=event_id,
+                participant1_id=recipient_id,
+                participant2_id=current_user.id
+            )
+        else:
+            # Inquirer messaging organizer
+            conversation = EventConversation(
+                event_id=event_id,
+                participant1_id=current_user.id,
+                participant2_id=organizer_id
+            )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+    
+    # Create message
+    db_message = EventMessage(
+        content=message.content,
+        conversation_id=conversation.id,
+        sender_id=current_user.id,
+        recipient_id=recipient_id
+    )
+    db.add(db_message)
+    
+    # Update conversation updated_at
+    conversation.updated_at = get_mountain_time()
+    
+    db.commit()
+    db.refresh(db_message)
+    
+    # Get usernames
+    recipient = get_user_by_id_helper(db, recipient_id)
+    
+    return EventMessageResponse(
+        id=db_message.id,
+        content=db_message.content,
+        is_read=db_message.is_read,
+        created_at=db_message.created_at,
+        conversation_id=db_message.conversation_id,
+        sender_id=current_user.id,
+        sender_username=current_user.username,
+        sender_is_admin=(current_user.permissions == "admin"),
+        sender_profile_picture=current_user.profile_picture,
+        recipient_id=recipient_id,
+        recipient_username=recipient.username if recipient else "unknown",
+        event_id=event_id
+    )
+
 # Admin-only endpoints
 @app.get("/admin/users", response_model=dict)
 async def get_all_users(
@@ -6556,12 +6880,23 @@ async def delete_user_admin(
         if market_conversation_ids:
             db.query(MarketItemMessage).filter(MarketItemMessage.conversation_id.in_(market_conversation_ids)).delete()
         
-        # Step 2: Get user's yard sales and items IDs first (needed for proper deletion order)
+        # Get all event conversations the user is part of
+        user_event_conversations = db.query(EventConversation).filter(
+            (EventConversation.participant1_id == user.id) | (EventConversation.participant2_id == user.id)
+        ).all()
+        event_conversation_ids = [conv.id for conv in user_event_conversations]
+        if event_conversation_ids:
+            db.query(EventMessage).filter(EventMessage.conversation_id.in_(event_conversation_ids)).delete()
+        
+        # Step 2: Get user's yard sales, items, and events IDs first (needed for proper deletion order)
         user_yard_sales = db.query(YardSale).filter(YardSale.owner_id == user.id).all()
         yard_sale_ids = [ys.id for ys in user_yard_sales] if user_yard_sales else []
         
         user_items = db.query(Item).filter(Item.owner_id == user.id).all()
         item_ids = [item.id for item in user_items] if user_items else []
+        
+        user_events = db.query(Event).filter(Event.organizer_id == user.id).all()
+        event_ids = [event.id for event in user_events] if user_events else []
         
         # Step 3: Delete comments on user's yard sales (must be before deleting yard sales)
         if yard_sale_ids:
@@ -6587,11 +6922,13 @@ async def delete_user_admin(
                 db.query(MarketItemMessage).filter(MarketItemMessage.conversation_id.in_(item_conv_ids)).delete()
             db.query(MarketItemConversation).filter(MarketItemConversation.item_id.in_(item_ids)).delete()
         
-        # Step 7: Delete conversations where user is a participant (not related to user's yard sales/items)
+        # Step 7: Delete conversations where user is a participant (not related to user's yard sales/items/events)
         db.query(Conversation).filter(Conversation.participant1_id == user.id).delete()
         db.query(Conversation).filter(Conversation.participant2_id == user.id).delete()
         db.query(MarketItemConversation).filter(MarketItemConversation.participant1_id == user.id).delete()
         db.query(MarketItemConversation).filter(MarketItemConversation.participant2_id == user.id).delete()
+        db.query(EventConversation).filter(EventConversation.participant1_id == user.id).delete()
+        db.query(EventConversation).filter(EventConversation.participant2_id == user.id).delete()
         
         # Step 8: Delete comments made by user (not on user's yard sales/items/events - those are already deleted)
         db.query(Comment).filter(Comment.user_id == user.id).delete()
@@ -6603,6 +6940,8 @@ async def delete_user_admin(
         db.query(Message).filter(Message.recipient_id == user.id).delete()
         db.query(MarketItemMessage).filter(MarketItemMessage.sender_id == user.id).delete()
         db.query(MarketItemMessage).filter(MarketItemMessage.recipient_id == user.id).delete()
+        db.query(EventMessage).filter(EventMessage.sender_id == user.id).delete()
+        db.query(EventMessage).filter(EventMessage.recipient_id == user.id).delete()
         
         # Step 10: Delete user's items (market items) - related records already deleted
         if item_ids:
@@ -6621,9 +6960,15 @@ async def delete_user_admin(
             db.query(Notification).filter(Notification.related_yard_sale_id.in_(yard_sale_ids)).delete()
         db.query(YardSale).filter(YardSale.owner_id == user.id).delete()
         
-        # Step 12: Delete user's events - comments will cascade
-        user_events = db.query(Event).filter(Event.organizer_id == user.id).all()
-        event_ids = [event.id for event in user_events] if user_events else []
+        # Step 12: Delete conversations related to user's events (must be before deleting events)
+        if event_ids:
+            event_conversations = db.query(EventConversation).filter(EventConversation.event_id.in_(event_ids)).all()
+            event_conv_ids = [conv.id for conv in event_conversations]
+            if event_conv_ids:
+                db.query(EventMessage).filter(EventMessage.conversation_id.in_(event_conv_ids)).delete()
+            db.query(EventConversation).filter(EventConversation.event_id.in_(event_ids)).delete()
+        
+        # Step 13: Delete user's events - related records already deleted
         if event_ids:
             # Delete comments on user's events (cascade should handle this, but being explicit)
             db.query(EventComment).filter(EventComment.event_id.in_(event_ids)).delete()

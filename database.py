@@ -480,6 +480,7 @@ class Event(Base):
     # Relationships
     organizer = relationship("User", back_populates="events_organized")
     comments = relationship("EventComment", back_populates="event", cascade="all, delete-orphan")
+    conversations = relationship("EventConversation", back_populates="event", cascade="all, delete-orphan")
 
 class EventComment(Base):
     __tablename__ = "event_comments"
@@ -494,6 +495,40 @@ class EventComment(Base):
     # Relationships
     event = relationship("Event", back_populates="comments")
     user = relationship("User")
+
+class EventConversation(Base):
+    __tablename__ = "event_conversations"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    event_id = Column(CHAR(36), ForeignKey("events.id"), nullable=False)
+    participant1_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # Inquirer
+    participant2_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # Event organizer
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Relationships
+    event = relationship("Event", back_populates="conversations")
+    participant1 = relationship("User", foreign_keys=[participant1_id])
+    participant2 = relationship("User", foreign_keys=[participant2_id])
+    messages = relationship("EventMessage", back_populates="conversation", cascade="all, delete-orphan")
+
+class EventMessage(Base):
+    __tablename__ = "event_messages"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    content = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=get_mountain_time)
+    
+    # Foreign Keys
+    conversation_id = Column(CHAR(36), ForeignKey("event_conversations.id"), nullable=False)
+    sender_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)
+    
+    # Relationships
+    conversation = relationship("EventConversation", back_populates="messages")
+    sender = relationship("User", foreign_keys=[sender_id])
+    recipient = relationship("User", foreign_keys=[recipient_id])
 
 # Dependency to get database session
 def get_db():
