@@ -16,73 +16,122 @@ if ! docker ps | grep -q yard-sale-db; then
     exit 1
 fi
 
-# Detect the users.id column type dynamically
-echo "🔍 Detecting users.id column type..."
-USER_ID_TYPE=$(docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale -N -e "
-    SELECT COLUMN_TYPE 
+# Check actual column definitions to ensure compatibility
+echo "🔍 Checking column types for foreign key compatibility..."
+USER_ID_DEF=$(docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale -sN -e "
+    SELECT CONCAT(COLUMN_TYPE, ' ', IFNULL(CHARACTER_SET_NAME, ''), ' ', IFNULL(COLLATION_NAME, ''))
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = 'yardsale' 
     AND TABLE_NAME = 'users' 
     AND COLUMN_NAME = 'id';
 " 2>/dev/null)
 
-if [ -z "$USER_ID_TYPE" ]; then
-    echo "⚠️  Could not detect users.id type, defaulting to CHAR(36)"
-    USER_ID_TYPE="CHAR(36)"
-fi
+EVENT_ID_DEF=$(docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale -sN -e "
+    SELECT CONCAT(COLUMN_TYPE, ' ', IFNULL(CHARACTER_SET_NAME, ''), ' ', IFNULL(COLLATION_NAME, ''))
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = 'yardsale' 
+    AND TABLE_NAME = 'events' 
+    AND COLUMN_NAME = 'id';
+" 2>/dev/null)
 
-echo "✅ Detected users.id type: $USER_ID_TYPE"
+echo "📋 users.id definition: $USER_ID_DEF"
+echo "📋 events.id definition: $EVENT_ID_DEF"
 echo ""
 
-# Create event_conversations table
+# Drop existing tables if they exist (in case of previous failed attempts)
+echo "📋 Dropping existing tables if they exist..."
+docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'DROPEOF' 2>/dev/null
+DROP TABLE IF EXISTS event_messages;
+DROP TABLE IF EXISTS event_conversations;
+DROPEOF
+
+# Create event_conversations table (without foreign keys first)
 echo "📋 Creating event_conversations table..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF
-CREATE TABLE IF NOT EXISTS event_conversations (
-    id $USER_ID_TYPE PRIMARY KEY,
-    event_id $USER_ID_TYPE NOT NULL,
-    participant1_id $USER_ID_TYPE NOT NULL COMMENT 'Inquirer',
-    participant2_id $USER_ID_TYPE NOT NULL COMMENT 'Event organizer',
+CREATE TABLE event_conversations (
+    id CHAR(36) PRIMARY KEY,
+    event_id CHAR(36) NOT NULL,
+    participant1_id CHAR(36) NOT NULL COMMENT 'Inquirer',
+    participant2_id CHAR(36) NOT NULL COMMENT 'Event organizer',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     INDEX idx_event_id (event_id),
     INDEX idx_participant1 (participant1_id),
-    INDEX idx_participant2 (participant2_id),
-    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
-    FOREIGN KEY (participant1_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (participant2_id) REFERENCES users(id) ON DELETE CASCADE
+    INDEX idx_participant2 (participant2_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 EOF
 
 if [ $? -eq 0 ]; then
     echo "✅ event_conversations table created successfully"
+    
+    # Add foreign key constraints separately
+    echo "📋 Adding foreign key constraints to event_conversations..."
+    docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'FKEOF' 2>/dev/null
+ALTER TABLE event_conversations 
+ADD CONSTRAINT event_conversations_ibfk_event 
+FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE;
+
+ALTER TABLE event_conversations 
+ADD CONSTRAINT event_conversations_ibfk_participant1 
+FOREIGN KEY (participant1_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE event_conversations 
+ADD CONSTRAINT event_conversations_ibfk_participant2 
+FOREIGN KEY (participant2_id) REFERENCES users(id) ON DELETE CASCADE;
+FKEOF
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Foreign key constraints added successfully"
+    else
+        echo "ℹ️  Foreign key constraints may already exist (this is okay)"
+    fi
 else
     echo "⚠️  event_conversations table may already exist or there was an error"
 fi
 
-# Create event_messages table
+# Create event_messages table (without foreign keys first)
 echo ""
 echo "📋 Creating event_messages table..."
 docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<EOF
-CREATE TABLE IF NOT EXISTS event_messages (
-    id $USER_ID_TYPE PRIMARY KEY,
+CREATE TABLE event_messages (
+    id CHAR(36) PRIMARY KEY,
     content TEXT NOT NULL,
     is_read BOOLEAN DEFAULT FALSE,
     created_at DATETIME NOT NULL,
-    conversation_id $USER_ID_TYPE NOT NULL,
-    sender_id $USER_ID_TYPE NOT NULL,
-    recipient_id $USER_ID_TYPE NOT NULL,
+    conversation_id CHAR(36) NOT NULL,
+    sender_id CHAR(36) NOT NULL,
+    recipient_id CHAR(36) NOT NULL,
     INDEX idx_conversation_id (conversation_id),
     INDEX idx_sender_id (sender_id),
     INDEX idx_recipient_id (recipient_id),
-    INDEX idx_is_read (is_read),
-    FOREIGN KEY (conversation_id) REFERENCES event_conversations(id) ON DELETE CASCADE,
-    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+    INDEX idx_is_read (is_read)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 EOF
 
 if [ $? -eq 0 ]; then
     echo "✅ event_messages table created successfully"
+    
+    # Add foreign key constraints separately
+    echo "📋 Adding foreign key constraints to event_messages..."
+    docker exec -i yard-sale-db mysql -uroot -psupersecretpassword yardsale <<'FKEOF' 2>/dev/null
+ALTER TABLE event_messages 
+ADD CONSTRAINT event_messages_ibfk_conversation 
+FOREIGN KEY (conversation_id) REFERENCES event_conversations(id) ON DELETE CASCADE;
+
+ALTER TABLE event_messages 
+ADD CONSTRAINT event_messages_ibfk_sender 
+FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE event_messages 
+ADD CONSTRAINT event_messages_ibfk_recipient 
+FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE;
+FKEOF
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Foreign key constraints added successfully"
+    else
+        echo "ℹ️  Foreign key constraints may already exist (this is okay)"
+    fi
 else
     echo "⚠️  event_messages table may already exist or there was an error"
 fi
