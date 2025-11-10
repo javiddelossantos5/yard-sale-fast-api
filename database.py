@@ -421,12 +421,19 @@ class Event(Base):
     id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     
     # Basic Information
-    type = Column(String(20), nullable=False, default="event")  # 'event', 'informational', 'advertisement', 'announcement', 'lost_found', 'request_help', 'offer_help', 'service_offer'
+    type = Column(String(20), nullable=False, default="event")  # 'event', 'informational', 'advertisement', 'announcement', 'lost_found', 'request_help', 'offer_help', 'service_offer', 'weather', 'job_posting'
     title = Column(String(150), nullable=False)
     description = Column(Text, nullable=True)
     category = Column(String(50), nullable=True)
     status = Column(String(20), default="upcoming", nullable=False)  # 'upcoming', 'ongoing', 'ended', 'cancelled'
     is_public = Column(Boolean, default=True, nullable=False)
+    
+    # Job Posting Fields
+    job_title = Column(String(150), nullable=True)  # Job title for job_posting type events
+    employment_type = Column(String(20), nullable=True)  # 'full_time', 'part_time', 'contract', 'temporary', 'seasonal', 'internship'
+    
+    # Weather Fields
+    weather_conditions = Column(String(255), nullable=True)  # Weather conditions for weather type events
     
     # Location & Time
     address = Column(String(255), nullable=True)

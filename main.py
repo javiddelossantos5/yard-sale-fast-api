@@ -1339,7 +1339,7 @@ class ImageListResponse(BaseModel):
 class EventCreate(BaseModel):
     type: str = Field(
         default="event", 
-        pattern="^(event|informational|advertisement|announcement|lost_found|request_help|offer_help|service_offer)$"
+        pattern="^(event|informational|advertisement|announcement|lost_found|request_help|offer_help|service_offer|weather|job_posting)$"
     )
     title: str = Field(..., min_length=1, max_length=150)
     description: Optional[str] = Field(None)
@@ -1367,6 +1367,13 @@ class EventCreate(BaseModel):
     tags: Optional[List[str]] = Field(None, description="List of tags for filtering and search (e.g., ['kids', 'music', 'outdoor'])")
     age_restriction: Optional[str] = Field(None, max_length=20, description="Age restriction (e.g., 'all', '18+', '21+')")
     
+    # Job Posting Fields
+    job_title: Optional[str] = Field(None, max_length=150, description="Job title for job_posting type events")
+    employment_type: Optional[str] = Field(None, pattern="^(full_time|part_time|contract|temporary|seasonal|internship)$", description="Employment type for job_posting events")
+    
+    # Weather Fields
+    weather_conditions: Optional[str] = Field(None, max_length=255, description="Weather conditions for weather type events")
+    
     # Organizer
     organizer_name: Optional[str] = Field(None, max_length=150)
     company: Optional[str] = Field(None, max_length=150)
@@ -1386,7 +1393,7 @@ class EventCreate(BaseModel):
 class EventUpdate(BaseModel):
     type: Optional[str] = Field(
         None, 
-        pattern="^(event|informational|advertisement|announcement|lost_found|request_help|offer_help|service_offer)$"
+        pattern="^(event|informational|advertisement|announcement|lost_found|request_help|offer_help|service_offer|weather|job_posting)$"
     )
     title: Optional[str] = Field(None, min_length=1, max_length=150)
     description: Optional[str] = None
@@ -1413,6 +1420,13 @@ class EventUpdate(BaseModel):
     # Filtering & Search
     tags: Optional[List[str]] = None
     age_restriction: Optional[str] = Field(None, max_length=20)
+    
+    # Job Posting Fields
+    job_title: Optional[str] = Field(None, max_length=150)
+    employment_type: Optional[str] = Field(None, pattern="^(full_time|part_time|contract|temporary|seasonal|internship)$")
+    
+    # Weather Fields
+    weather_conditions: Optional[str] = Field(None, max_length=255)
     
     # Organizer
     organizer_name: Optional[str] = Field(None, max_length=150)
@@ -1458,6 +1472,13 @@ class EventResponse(BaseModel):
     # Filtering & Search
     tags: Optional[List[str]] = None
     age_restriction: Optional[str] = None
+    
+    # Job Posting Fields
+    job_title: Optional[str] = None
+    employment_type: Optional[str] = None  # full_time, part_time, contract, temporary, seasonal, internship
+    
+    # Weather Fields
+    weather_conditions: Optional[str] = None
     
     # Organizer
     organizer_id: str
@@ -5712,6 +5733,9 @@ async def create_event(
         is_free=event.is_free,
         tags=event.tags if event.tags else None,
         age_restriction=event.age_restriction,
+        job_title=event.job_title,
+        employment_type=event.employment_type,
+        weather_conditions=event.weather_conditions,
         organizer_id=current_user.id,
         organizer_name=event.organizer_name or current_user.full_name,
         company=event.company,
@@ -5759,6 +5783,9 @@ async def create_event(
         is_free=new_event.is_free,
         tags=new_event.tags if new_event.tags else None,
         age_restriction=new_event.age_restriction,
+        job_title=new_event.job_title,
+        employment_type=new_event.employment_type,
+        weather_conditions=new_event.weather_conditions,
         organizer_id=new_event.organizer_id,
         organizer_username=organizer.username,
         organizer_name=new_event.organizer_name,
@@ -5849,6 +5876,9 @@ async def get_events(
             is_free=event.is_free,
             tags=event.tags if event.tags else None,
             age_restriction=event.age_restriction,
+            job_title=event.job_title,
+            employment_type=event.employment_type,
+            weather_conditions=event.weather_conditions,
             organizer_id=event.organizer_id,
             organizer_username=organizer.username,
             organizer_name=event.organizer_name,
@@ -5902,6 +5932,9 @@ async def get_event(event_id: str, db: Session = Depends(get_db)):
         is_free=event.is_free,
         tags=event.tags if event.tags else None,
         age_restriction=event.age_restriction,
+        job_title=event.job_title,
+        employment_type=event.employment_type,
+        weather_conditions=event.weather_conditions,
         organizer_id=event.organizer_id,
         organizer_username=organizer.username,
         organizer_name=event.organizer_name,
@@ -5984,6 +6017,9 @@ async def update_event(
         is_free=event.is_free,
         tags=event.tags if event.tags else None,
         age_restriction=event.age_restriction,
+        job_title=event.job_title,
+        employment_type=event.employment_type,
+        weather_conditions=event.weather_conditions,
         organizer_id=event.organizer_id,
         organizer_username=organizer.username,
         organizer_name=event.organizer_name,
