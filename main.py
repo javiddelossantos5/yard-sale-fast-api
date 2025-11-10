@@ -766,6 +766,7 @@ class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=72, description="Password (6-72 characters)")
     password_confirm: str = Field(..., min_length=6, max_length=72, description="Confirm password (must match password)")
     full_name: Optional[str] = Field(None, max_length=100, description="Full name")
+    company: Optional[str] = Field(None, max_length=150, description="Company name (optional)")
     location: Optional[Location] = None
     bio: Optional[str] = Field(None, max_length=1000, description="User bio")
     # NOTE: permissions field removed - all new users are created with "user" permission
@@ -797,6 +798,7 @@ class UserResponse(UserBase):
     id: str
     full_name: Optional[str]
     phone_number: Optional[str]
+    company: Optional[str] = None
     city: Optional[str]
     state: Optional[str]
     zip_code: Optional[str]
@@ -811,6 +813,7 @@ class UserUpdate(BaseModel):
     """Model for users to update their own profile"""
     full_name: Optional[str] = Field(None, max_length=100)
     phone_number: Optional[str] = Field(None, max_length=20)
+    company: Optional[str] = Field(None, max_length=150, description="Company name (optional)")
     city: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=2)
     zip_code: Optional[str] = Field(None, max_length=10)
@@ -1277,6 +1280,7 @@ class UserProfileResponse(BaseModel):
     email: str
     full_name: Optional[str]
     phone_number: Optional[str]
+    company: Optional[str] = None
     city: Optional[str]
     state: Optional[str]
     zip_code: Optional[str]
@@ -1900,6 +1904,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         hashed_password=hashed_password,
         full_name=user.full_name,
+        company=user.company,
         city=city,
         state=state,
         zip_code=zip_code,
@@ -1919,6 +1924,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         email=db_user.email,
         full_name=db_user.full_name,
         phone_number=db_user.phone_number,
+        company=db_user.company,
         city=db_user.city,
         state=db_user.state,
         zip_code=db_user.zip_code,
@@ -2018,6 +2024,7 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
         email=current_user.email,
         full_name=current_user.full_name,
         phone_number=current_user.phone_number,
+        company=current_user.company,
         city=current_user.city,
         state=current_user.state,
         zip_code=current_user.zip_code,
@@ -2058,6 +2065,9 @@ async def update_user_profile(
     if user_update.profile_picture is not None:
         value = user_update.profile_picture.strip() if isinstance(user_update.profile_picture, str) else user_update.profile_picture
         current_user.profile_picture = value if value else None
+    if user_update.company is not None:
+        value = user_update.company.strip() if isinstance(user_update.company, str) else user_update.company
+        current_user.company = value if value else None
     
     current_user.updated_at = get_mountain_time()
     
@@ -2077,6 +2087,7 @@ async def update_user_profile(
         email=current_user.email,
         full_name=current_user.full_name,
         phone_number=current_user.phone_number,
+        company=current_user.company,
         city=current_user.city,
         state=current_user.state,
         zip_code=current_user.zip_code,
@@ -4992,6 +5003,7 @@ async def get_user_by_id(
         email=user.email,
         full_name=user.full_name,
         phone_number=user.phone_number,
+        company=user.company,
         city=user.city,
         state=user.state,
         zip_code=user.zip_code,
@@ -5032,6 +5044,7 @@ async def get_user_profile(
         email=user.email,
         full_name=user.full_name,
         phone_number=user.phone_number,
+        company=user.company,
         city=user.city,
         state=user.state,
         zip_code=user.zip_code,
@@ -5255,6 +5268,7 @@ async def get_user_by_id(
         email=user.email,
         full_name=user.full_name,
         phone_number=user.phone_number,
+        company=user.company,
         city=user.city,
         state=user.state,
         zip_code=user.zip_code,
@@ -6351,6 +6365,7 @@ async def get_all_users(
             email=user.email,
             full_name=user.full_name,
             phone_number=user.phone_number,
+            company=user.company,
             city=user.city,
             state=user.state,
             zip_code=user.zip_code,
@@ -6394,6 +6409,7 @@ async def get_user_by_id_admin(
         email=user.email,
         full_name=user.full_name,
         phone_number=user.phone_number,
+        company=user.company,
         city=user.city,
         state=user.state,
         zip_code=user.zip_code,
@@ -6409,6 +6425,7 @@ class UserUpdateAdmin(BaseModel):
     full_name: Optional[str] = Field(None, max_length=100)
     email: Optional[str] = Field(None)
     phone_number: Optional[str] = Field(None, max_length=20)
+    company: Optional[str] = Field(None, max_length=150, description="Company name (optional)")
     city: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=2)
     zip_code: Optional[str] = Field(None, max_length=10)
@@ -6461,6 +6478,9 @@ async def update_user_admin(
     if user_update.profile_picture is not None:
         value = user_update.profile_picture.strip() if isinstance(user_update.profile_picture, str) else user_update.profile_picture
         user.profile_picture = value if value else None
+    if user_update.company is not None:
+        value = user_update.company.strip() if isinstance(user_update.company, str) else user_update.company
+        user.company = value if value else None
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
     if user_update.permissions is not None:
@@ -6485,6 +6505,7 @@ async def update_user_admin(
         email=user.email,
         full_name=user.full_name,
         phone_number=user.phone_number,
+        company=user.company,
         city=user.city,
         state=user.state,
         zip_code=user.zip_code,

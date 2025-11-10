@@ -54,6 +54,7 @@ class User(Base):
     full_name = Column(String(100), nullable=True)
     phone_number = Column(String(20), nullable=True)
     bio = Column(Text, nullable=True)
+    company = Column(String(150), nullable=True)  # Optional company name
     
     # Location fields
     city = Column(String(100), nullable=True)
