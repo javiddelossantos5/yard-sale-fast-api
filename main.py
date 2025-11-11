@@ -1591,6 +1591,18 @@ class NotificationResponse(BaseModel):
 class NotificationCountResponse(BaseModel):
     total_notifications: int
     unread_notifications: int
+    unread_yard_sale_messages: int = 0
+    unread_market_item_messages: int = 0
+    unread_event_messages: int = 0
+    pending_reports: int = 0  # Only for admins
+
+class NotificationsWithCountsResponse(BaseModel):
+    notifications: List[NotificationResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    counts: NotificationCountResponse
 
 # Enhanced Messaging Models
 class MessagesWithNotificationStatus(BaseModel):
@@ -5585,7 +5597,7 @@ async def get_yard_sale_visit_stats(
     )
 
 # Notification Endpoints
-@app.get("/notifications", response_model=List[NotificationResponse])
+@app.get("/notifications", response_model=NotificationsWithCountsResponse)
 async def get_user_notifications(
     skip: int = 0,
     limit: int = 50,
@@ -5593,64 +5605,177 @@ async def get_user_notifications(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Get notifications for the current user"""
-    query = db.query(Notification).filter(Notification.user_id == current_user.id)
-    
-    if unread_only:
-        query = query.filter(Notification.is_read == False)
-    
-    notifications = query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
-    
-    result = []
-    for notification in notifications:
-        # Get related user info
-        related_user_username = None
-        if notification.related_user_id:
-            related_user = db.query(User).filter(User.id == notification.related_user_id).first()
-            if related_user:
-                related_user_username = related_user.username
+    """Get notifications for the current user with counts"""
+    try:
+        # Get notifications
+        query = db.query(Notification).filter(Notification.user_id == current_user.id)
         
-        # Get related yard sale info
-        related_yard_sale_title = None
-        if notification.related_yard_sale_id:
-            related_yard_sale = db.query(YardSale).filter(YardSale.id == notification.related_yard_sale_id).first()
-            if related_yard_sale:
-                related_yard_sale_title = related_yard_sale.title
+        if unread_only:
+            query = query.filter(Notification.is_read == False)
         
-        result.append(NotificationResponse(
-            id=notification.id,
-            type=notification.type,
-            title=notification.title,
-            message=notification.message,
-            is_read=notification.is_read,
-            created_at=notification.created_at,
-            read_at=notification.read_at,
-            user_id=notification.user_id,
-            related_user_id=notification.related_user_id,
-            related_user_username=related_user_username,
-            related_yard_sale_id=notification.related_yard_sale_id,
-            related_yard_sale_title=related_yard_sale_title,
-            related_message_id=notification.related_message_id
-        ))
-    
-    return result
+        total_count = query.count()
+        notifications = query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
+        
+        result = []
+        for notification in notifications:
+            # Get related user info
+            related_user_username = None
+            if notification.related_user_id:
+                related_user = db.query(User).filter(User.id == notification.related_user_id).first()
+                if related_user:
+                    related_user_username = related_user.username
+            
+            # Get related yard sale info
+            related_yard_sale_title = None
+            if notification.related_yard_sale_id:
+                related_yard_sale = db.query(YardSale).filter(YardSale.id == notification.related_yard_sale_id).first()
+                if related_yard_sale:
+                    related_yard_sale_title = related_yard_sale.title
+            
+            result.append(NotificationResponse(
+                id=notification.id,
+                type=notification.type,
+                title=notification.title,
+                message=notification.message,
+                is_read=notification.is_read,
+                created_at=notification.created_at,
+                read_at=notification.read_at,
+                user_id=notification.user_id,
+                related_user_id=notification.related_user_id,
+                related_user_username=related_user_username,
+                related_yard_sale_id=notification.related_yard_sale_id,
+                related_yard_sale_title=related_yard_sale_title,
+                related_message_id=notification.related_message_id
+            ))
+        
+        # Calculate counts (same logic as /notifications/count)
+        # Regular notifications
+        total_notifications = db.query(Notification).filter(Notification.user_id == current_user.id).count()
+        unread_notifications = db.query(Notification).filter(
+            Notification.user_id == current_user.id,
+            Notification.is_read == False
+        ).count()
+        
+        # Unread yard sale messages
+        yard_sale_conversations = db.query(Conversation).filter(
+            (Conversation.participant1_id == current_user.id) | 
+            (Conversation.participant2_id == current_user.id)
+        ).all()
+        yard_sale_conversation_ids = [conv.id for conv in yard_sale_conversations]
+        unread_yard_sale_messages = db.query(Message).filter(
+            Message.conversation_id.in_(yard_sale_conversation_ids),
+            Message.recipient_id == current_user.id,
+            Message.is_read == False
+        ).count() if yard_sale_conversation_ids else 0
+        
+        # Unread market item messages
+        unread_market_item_messages = db.query(MarketItemMessage).filter(
+            MarketItemMessage.recipient_id == current_user.id,
+            MarketItemMessage.is_read == False
+        ).count()
+        
+        # Unread event messages
+        event_conversations = db.query(EventConversation).filter(
+            (EventConversation.participant1_id == current_user.id) | 
+            (EventConversation.participant2_id == current_user.id)
+        ).all()
+        event_conversation_ids = [conv.id for conv in event_conversations]
+        unread_event_messages = db.query(EventMessage).filter(
+            EventMessage.conversation_id.in_(event_conversation_ids),
+            EventMessage.recipient_id == current_user.id,
+            EventMessage.is_read == False
+        ).count() if event_conversation_ids else 0
+        
+        # Pending reports (only for admins)
+        pending_reports = 0
+        if current_user.permissions == "admin":
+            pending_reports = db.query(Report).filter(Report.status == "pending").count()
+        
+        counts = NotificationCountResponse(
+            total_notifications=total_notifications,
+            unread_notifications=unread_notifications,
+            unread_yard_sale_messages=unread_yard_sale_messages,
+            unread_market_item_messages=unread_market_item_messages,
+            unread_event_messages=unread_event_messages,
+            pending_reports=pending_reports
+        )
+        
+        return NotificationsWithCountsResponse(
+            notifications=result,
+            total=total_count,
+            limit=limit,
+            offset=skip,
+            has_more=(skip + len(result)) < total_count,
+            counts=counts
+        )
+    except Exception as e:
+        import traceback
+        print(f"Error getting notifications: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.get("/notifications/count", response_model=NotificationCountResponse)
 async def get_notification_count(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Get notification count for the current user"""
-    total_notifications = db.query(Notification).filter(Notification.user_id == current_user.id).count()
-    unread_notifications = db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_read == False
-    ).count()
-    
-    return NotificationCountResponse(
-        total_notifications=total_notifications,
-        unread_notifications=unread_notifications
-    )
+    """Get notification count for the current user, including unread messages from yard sales, market items, events, and pending reports (for admins)"""
+    try:
+        # Regular notifications
+        total_notifications = db.query(Notification).filter(Notification.user_id == current_user.id).count()
+        unread_notifications = db.query(Notification).filter(
+            Notification.user_id == current_user.id,
+            Notification.is_read == False
+        ).count()
+        
+        # Unread yard sale messages
+        yard_sale_conversations = db.query(Conversation).filter(
+            (Conversation.participant1_id == current_user.id) | 
+            (Conversation.participant2_id == current_user.id)
+        ).all()
+        yard_sale_conversation_ids = [conv.id for conv in yard_sale_conversations]
+        unread_yard_sale_messages = db.query(Message).filter(
+            Message.conversation_id.in_(yard_sale_conversation_ids),
+            Message.recipient_id == current_user.id,
+            Message.is_read == False
+        ).count() if yard_sale_conversation_ids else 0
+        
+        # Unread market item messages
+        unread_market_item_messages = db.query(MarketItemMessage).filter(
+            MarketItemMessage.recipient_id == current_user.id,
+            MarketItemMessage.is_read == False
+        ).count()
+        
+        # Unread event messages
+        event_conversations = db.query(EventConversation).filter(
+            (EventConversation.participant1_id == current_user.id) | 
+            (EventConversation.participant2_id == current_user.id)
+        ).all()
+        event_conversation_ids = [conv.id for conv in event_conversations]
+        unread_event_messages = db.query(EventMessage).filter(
+            EventMessage.conversation_id.in_(event_conversation_ids),
+            EventMessage.recipient_id == current_user.id,
+            EventMessage.is_read == False
+        ).count() if event_conversation_ids else 0
+        
+        # Pending reports (only for admins)
+        pending_reports = 0
+        if current_user.permissions == "admin":
+            pending_reports = db.query(Report).filter(Report.status == "pending").count()
+        
+        return NotificationCountResponse(
+            total_notifications=total_notifications,
+            unread_notifications=unread_notifications,
+            unread_yard_sale_messages=unread_yard_sale_messages,
+            unread_market_item_messages=unread_market_item_messages,
+            unread_event_messages=unread_event_messages,
+            pending_reports=pending_reports
+        )
+    except Exception as e:
+        import traceback
+        print(f"Error getting notification count: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Get message-specific notification counts
 @app.get("/notifications/counts", response_model=MessageNotificationCounts)
@@ -7111,6 +7236,8 @@ async def get_all_items_admin(
                 "status": item.status,
                 "is_public": item.is_public,
                 "category": item.category,
+                "photos": item.photos if item.photos else [],
+                "featured_image": item.featured_image,
                 "owner_id": str(item.owner_id),
                 "owner_username": owner.username if owner else "unknown",
                 "owner_is_admin": owner.permissions == "admin" if owner else False,
@@ -7163,6 +7290,8 @@ async def get_all_yard_sales_admin(
                 "state": yard_sale.state,
                 "status": yard_sale.status,
                 "is_active": yard_sale.is_active,
+                "photos": yard_sale.photos if yard_sale.photos else [],
+                "featured_image": yard_sale.featured_image,
                 "owner_id": str(yard_sale.owner_id),
                 "owner_username": owner.username if owner else "unknown",
                 "owner_is_admin": owner.permissions == "admin" if owner else False,
