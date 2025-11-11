@@ -94,6 +94,14 @@ class User(Base):
     
     # Events relationships
     events_organized = relationship("Event", back_populates="organizer")
+    event_comments = relationship("EventComment", back_populates="user")
+    event_conversations_as_participant1 = relationship("EventConversation", foreign_keys="EventConversation.participant1_id", back_populates="participant1")
+    event_conversations_as_participant2 = relationship("EventConversation", foreign_keys="EventConversation.participant2_id", back_populates="participant2")
+    event_sent_messages = relationship("EventMessage", foreign_keys="EventMessage.sender_id", back_populates="sender")
+    event_received_messages = relationship("EventMessage", foreign_keys="EventMessage.recipient_id", back_populates="recipient")
+    
+    # Saved filters relationship
+    saved_filters = relationship("SavedFilter", back_populates="user")
 
 class Item(Base):
     __tablename__ = "items"
@@ -529,6 +537,20 @@ class EventMessage(Base):
     conversation = relationship("EventConversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id])
     recipient = relationship("User", foreign_keys=[recipient_id])
+
+class SavedFilter(Base):
+    __tablename__ = "saved_filters"
+    
+    id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False, index=True)
+    filter_type = Column(String(20), nullable=False)  # 'yard_sale', 'market_item', 'event'
+    name = Column(String(100), nullable=False)  # User-friendly name for the filter
+    filters = Column(JSON, nullable=False)  # JSON object containing all filter parameters
+    created_at = Column(DateTime, default=get_mountain_time)
+    updated_at = Column(DateTime, default=get_mountain_time, onupdate=get_mountain_time)
+    
+    # Relationship
+    user = relationship("User", back_populates="saved_filters")
 
 # Dependency to get database session
 def get_db():

@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 # This must be called before any os.getenv() calls
 load_dotenv()
 from database import get_db, create_tables, User, Item, YardSale, Comment, Message, Conversation, UserRating, Report, Verification, VisitedYardSale, Notification
-from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, Event, EventComment, EventConversation, EventMessage, get_mountain_time
+from database import MarketItemComment, WatchedItem, MarketItemConversation, MarketItemMessage, Event, EventComment, EventConversation, EventMessage, SavedFilter, get_mountain_time
 
 def calculate_price_reduction_fields(item: Item) -> dict:
     """Calculate price reduction fields for MarketItemResponse"""
@@ -1622,6 +1622,25 @@ class MessageNotificationCounts(BaseModel):
     unread_message_notifications: int
     total_message_notifications: int
     last_updated: datetime
+
+# Saved Filter Models
+class SavedFilterCreate(BaseModel):
+    filter_type: str = Field(..., pattern="^(yard_sale|market_item|event)$", description="Type of filter: yard_sale, market_item, or event")
+    name: str = Field(..., min_length=1, max_length=100, description="User-friendly name for the filter")
+    filters: Dict = Field(..., description="JSON object containing all filter parameters")
+
+class SavedFilterUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    filters: Optional[Dict] = None
+
+class SavedFilterResponse(BaseModel):
+    id: str
+    user_id: str
+    filter_type: str
+    name: str
+    filters: Dict
+    created_at: datetime
+    updated_at: datetime
 
 class ConversationSummary(BaseModel):
     conversation_id: str
@@ -6097,6 +6116,169 @@ async def get_events(
         ))
     
     return result
+
+# Saved Filter Endpoints
+@app.post("/saved-filters", response_model=SavedFilterResponse, status_code=status.HTTP_201_CREATED)
+async def create_saved_filter(
+    filter_data: SavedFilterCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Save a filter configuration for yard sales, market items, or events"""
+    try:
+        saved_filter = SavedFilter(
+            user_id=current_user.id,
+            filter_type=filter_data.filter_type,
+            name=filter_data.name,
+            filters=filter_data.filters
+        )
+        
+        db.add(saved_filter)
+        db.commit()
+        db.refresh(saved_filter)
+        
+        return SavedFilterResponse(
+            id=saved_filter.id,
+            user_id=saved_filter.user_id,
+            filter_type=saved_filter.filter_type,
+            name=saved_filter.name,
+            filters=saved_filter.filters,
+            created_at=saved_filter.created_at,
+            updated_at=saved_filter.updated_at
+        )
+    except Exception as e:
+        db.rollback()
+        import traceback
+        print(f"Error creating saved filter: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/saved-filters", response_model=List[SavedFilterResponse])
+async def get_saved_filters(
+    filter_type: Optional[str] = Query(None, pattern="^(yard_sale|market_item|event)$", description="Filter by type"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all saved filters for the current user, optionally filtered by type"""
+    try:
+        query = db.query(SavedFilter).filter(SavedFilter.user_id == current_user.id)
+        
+        if filter_type:
+            query = query.filter(SavedFilter.filter_type == filter_type)
+        
+        saved_filters = query.order_by(SavedFilter.updated_at.desc()).all()
+        
+        return [
+            SavedFilterResponse(
+                id=sf.id,
+                user_id=sf.user_id,
+                filter_type=sf.filter_type,
+                name=sf.name,
+                filters=sf.filters,
+                created_at=sf.created_at,
+                updated_at=sf.updated_at
+            )
+            for sf in saved_filters
+        ]
+    except Exception as e:
+        import traceback
+        print(f"Error getting saved filters: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/saved-filters/{filter_id}", response_model=SavedFilterResponse)
+async def get_saved_filter(
+    filter_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get a specific saved filter by ID"""
+    saved_filter = db.query(SavedFilter).filter(
+        SavedFilter.id == filter_id,
+        SavedFilter.user_id == current_user.id
+    ).first()
+    
+    if not saved_filter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved filter not found")
+    
+    return SavedFilterResponse(
+        id=saved_filter.id,
+        user_id=saved_filter.user_id,
+        filter_type=saved_filter.filter_type,
+        name=saved_filter.name,
+        filters=saved_filter.filters,
+        created_at=saved_filter.created_at,
+        updated_at=saved_filter.updated_at
+    )
+
+@app.put("/saved-filters/{filter_id}", response_model=SavedFilterResponse)
+async def update_saved_filter(
+    filter_id: str,
+    filter_update: SavedFilterUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Update a saved filter"""
+    saved_filter = db.query(SavedFilter).filter(
+        SavedFilter.id == filter_id,
+        SavedFilter.user_id == current_user.id
+    ).first()
+    
+    if not saved_filter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved filter not found")
+    
+    try:
+        if filter_update.name is not None:
+            saved_filter.name = filter_update.name
+        if filter_update.filters is not None:
+            saved_filter.filters = filter_update.filters
+        
+        saved_filter.updated_at = get_mountain_time()
+        
+        db.commit()
+        db.refresh(saved_filter)
+        
+        return SavedFilterResponse(
+            id=saved_filter.id,
+            user_id=saved_filter.user_id,
+            filter_type=saved_filter.filter_type,
+            name=saved_filter.name,
+            filters=saved_filter.filters,
+            created_at=saved_filter.created_at,
+            updated_at=saved_filter.updated_at
+        )
+    except Exception as e:
+        db.rollback()
+        import traceback
+        print(f"Error updating saved filter: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.delete("/saved-filters/{filter_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_saved_filter(
+    filter_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a saved filter"""
+    saved_filter = db.query(SavedFilter).filter(
+        SavedFilter.id == filter_id,
+        SavedFilter.user_id == current_user.id
+    ).first()
+    
+    if not saved_filter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved filter not found")
+    
+    try:
+        db.delete(saved_filter)
+        db.commit()
+        return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+    except Exception as e:
+        db.rollback()
+        import traceback
+        print(f"Error deleting saved filter: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Event Conversation and Message Endpoints (must come before /events/{event_id} to avoid route conflicts)
 @app.get("/events/conversations", response_model=List[EventConversationResponse])
