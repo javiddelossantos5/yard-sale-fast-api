@@ -5137,6 +5137,34 @@ async def create_report(
     db.commit()
     db.refresh(report)
     
+    # Check if reported user has been reported 5 times by 5 different users
+    # If so, automatically deactivate their account
+    if reported_user and reported_user.is_active:
+        # Count distinct reporters for this user
+        distinct_reporter_count = db.query(Report.reporter_id).filter(
+            Report.reported_user_id == reported_user.id
+        ).distinct().count()
+        
+        if distinct_reporter_count >= 5:
+            reported_user.is_active = False
+            db.commit()
+            db.refresh(reported_user)
+            
+            # Notify admins about the auto-deactivation
+            try:
+                admins = db.query(User).filter(User.permissions == "admin").all()
+                for admin in admins:
+                    create_notification(
+                        db=db,
+                        user_id=admin.id,
+                        notification_type="report",
+                        title="User Auto-Deactivated",
+                        message=f"User {reported_user.username} has been automatically deactivated after receiving 5 reports from 5 different users.",
+                        related_user_id=reported_user.id
+                    )
+            except Exception as e:
+                print(f"Error notifying admins about auto-deactivation: {e}")
+    
     # Notify all admins about the new report
     try:
         admins = db.query(User).filter(User.permissions == "admin").all()
