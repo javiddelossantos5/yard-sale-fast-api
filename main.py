@@ -7108,6 +7108,7 @@ class UserUpdateAdmin(BaseModel):
     profile_picture: Optional[str] = Field(None, max_length=500, description="URL to profile picture (optional)")
     is_active: Optional[bool] = None
     permissions: Optional[str] = Field(None, description="User permission level: 'user', 'moderator', or 'admin'")
+    password: Optional[str] = Field(None, min_length=8, max_length=72, description="New password (minimum 8 characters, optional)")
     
     def model_post_init(self, __context):
         """Validate permissions value if provided"""
@@ -7161,6 +7162,15 @@ async def update_user_admin(
     if user_update.permissions is not None:
         # Permissions is now a string (validated in the model)
         user.permissions = user_update.permissions
+    if user_update.password is not None:
+        # Validate password length (minimum 8 characters)
+        if len(user_update.password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters long"
+            )
+        # Hash the new password
+        user.hashed_password = get_password_hash(user_update.password)
     
     user.updated_at = get_mountain_time()
     
