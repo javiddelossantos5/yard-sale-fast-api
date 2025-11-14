@@ -163,6 +163,7 @@ class YardSale(Base):
     end_date = Column(Date, nullable=True)  # Optional for multi-day sales
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
+    timezone = Column(String(50), nullable=True)  # Timezone (e.g., 'America/New_York', 'America/Los_Angeles')
     
     # Location
     address = Column(String(300), nullable=False)

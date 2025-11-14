@@ -1105,6 +1105,7 @@ class YardSaleCreate(BaseModel):
     end_date: Optional[date] = Field(None, description="End date (optional for multi-day sales)")
     start_time: time = Field(..., description="Start time each day")
     end_time: time = Field(..., description="End time each day")
+    timezone: Optional[str] = Field(None, max_length=50, description="Timezone (e.g., 'America/New_York', 'America/Los_Angeles')")
     
     # Location
     address: str = Field(..., min_length=1, max_length=300, description="Full street address")
@@ -1141,6 +1142,7 @@ class YardSaleUpdate(BaseModel):
     end_date: Optional[date] = None
     start_time: Optional[time] = None
     end_time: Optional[time] = None
+    timezone: Optional[str] = Field(None, max_length=50, description="Timezone (e.g., 'America/New_York', 'America/Los_Angeles')")
     address: Optional[str] = Field(None, min_length=1, max_length=300)
     city: Optional[str] = Field(None, min_length=1, max_length=100)
     state: Optional[str] = Field(None, min_length=2, max_length=2)
@@ -1169,6 +1171,7 @@ class YardSaleResponse(BaseModel):
     end_date: Optional[date]
     start_time: time
     end_time: time
+    timezone: Optional[str]
     address: str
     city: str
     state: str
@@ -3500,6 +3503,7 @@ async def create_yard_sale(yard_sale: YardSaleCreate, current_user: User = Depen
         end_date=yard_sale.end_date,
         start_time=yard_sale.start_time,
         end_time=yard_sale.end_time,
+        timezone=yard_sale.timezone,
         address=yard_sale.address,
         city=yard_sale.city,
         state=yard_sale.state.upper(),  # Store as uppercase
